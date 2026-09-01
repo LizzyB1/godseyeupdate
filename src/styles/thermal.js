@@ -3,6 +3,7 @@
  * Military-grade thermal imaging with White-Hot/Black-Hot modes,
  * coherent temporal noise, hot-spot bloom, temperature banding,
  * soft IR diffraction, and full HUD overlay rendered in GLSL.
+ * Renders full-frame — no circular lens mask or edge shading.
  *
  * Exposed uniforms:
  *   sensitivity (0-1) — contrast/range of temperature mapping
@@ -143,22 +144,6 @@ export const thermalShader = {
       vec2 dims = colorTextureDimensions;
       vec2 texel = 1.0 / dims;
       vec2 hudUV = uv; // preserve original UV for HUD overlay
-
-      // ── Circular vignette mask (FLIR optics field of view) ──
-      vec2 centered = uv * 2.0 - 1.0;
-      float aspect = dims.x / dims.y;
-      centered.x *= aspect;
-      float radius = length(centered);
-      float lensMask = pow(1.0 - smoothstep(0.6, 1.05, radius), 0.7);
-      // Tube brightness falloff (center brightest)
-      float lensShading = 1.0 - radius * radius * 0.25;
-      lensShading = max(lensShading, 0.0);
-
-      // If outside lens, render black
-      if (lensMask < 0.001) {
-        out_FragColor = vec4(vec3(0.0), 1.0);
-        return;
-      }
 
       // ── Sensor resolution pixelation (authentic FLIR resolution limits) ──
       float pixSize = mix(1.0, pixelation, intensity);
@@ -323,16 +308,11 @@ export const thermalShader = {
       // Actually, HUD should always be visible — use contrast
       thermalColor += hud * 0.6 * intensity;
 
-      // ── Lens shading + vignette ───────────────────
-      thermalColor *= lensShading;
-      thermalColor *= lensMask;
-
       // Clamp final
       thermalColor = clamp(thermalColor, 0.0, 1.0);
 
-      // Blend with original based on intensity, then fade to black at lens edges
+      // Blend with original based on intensity — full frame, no lens shading/mask.
       vec3 finalColor = mix(original.rgb, thermalColor, intensity);
-      finalColor *= mix(1.0, lensMask, intensity);
 
       out_FragColor = vec4(finalColor, 1.0);
     }

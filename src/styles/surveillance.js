@@ -1,7 +1,7 @@
 /**
  * Night Vision / NVG — PVS-14 Image Intensifier Emulation
- * P43 phosphor green, intensifier tube bloom, circular vignette,
- * scintillation noise, honeycomb pattern, auto-gain, HUD overlay.
+ * P43 phosphor green, intensifier tube bloom, full-frame (no circular
+ * mask/shading), scintillation noise, honeycomb pattern, auto-gain, HUD overlay.
  *
  * Exposed uniforms:
  *   gain (0-1)        — intensifier gain (bloom + noise balance)
@@ -143,29 +143,7 @@ export const nightVisionShader = {
 
       // ── Barrel distortion (NVG lens distortion) ─────────
       float dist = 0.5 * intensity;
-      vec2 distUV = barrelDistort(uv, dist);
-
-      // ── Circular vignette mask (NVG tube field of view) ──
-      vec2 centered = uv * 2.0 - 1.0;
-      float aspect = dims.x / dims.y;
-      centered.x *= aspect;
-      float radius = length(centered);
-      float tubeMask = pow(1.0 - smoothstep(0.6, 1.05, radius), 0.7);
-      // Tube brightness falloff (center brightest)
-      float tubeShading = 1.0 - radius * radius * 0.3;
-      tubeShading = max(tubeShading, 0.0);
-
-      // If outside tube, render black
-      if (tubeMask < 0.001) {
-        out_FragColor = vec4(vec3(0.0), 1.0);
-        return;
-      }
-
-      // Black outside distorted area
-      if (distUV.x < 0.0 || distUV.x > 1.0 || distUV.y < 0.0 || distUV.y > 1.0) {
-        out_FragColor = vec4(vec3(0.0), 1.0);
-        return;
-      }
+      vec2 distUV = clamp(barrelDistort(uv, dist), 0.0, 1.0);
 
       // ── Intensifier tube resolution pixelation ────────────
       float pixSize = mix(1.0, pixelation, intensity);
@@ -228,12 +206,6 @@ export const nightVisionShader = {
       scanline = pow(scanline, 2.5);
       nvgColor *= 1.0 - scanline * scanlineStr * 0.15 * intensity;
 
-      // ── Tube shading (brightness falloff from center) ───
-      nvgColor *= tubeShading;
-
-      // ── Circular vignette (dark edges, NVG tube shape) ──
-      nvgColor *= tubeMask;
-
       // ── HUD Overlay ─────────────────────────────────────
 
       // Top-left: "NVG" / "I²" label marker
@@ -270,8 +242,7 @@ export const nightVisionShader = {
       // ── Final composite ─────────────────────────────────
       nvgColor = clamp(nvgColor, 0.0, 1.0);
 
-      // Keep NVG output fully tube-masked at full intensity to avoid color bleed at the lens edge.
-      vec3 finalColor = mix(original.rgb, nvgColor * tubeMask, intensity);
+      vec3 finalColor = mix(original.rgb, nvgColor, intensity);
 
       out_FragColor = vec4(finalColor, 1.0);
     }
