@@ -2042,6 +2042,27 @@ export class DataLayerManager {
       count.className = 'data-count';
       count.textContent = layer.stats.count ? this._formatCount(layer.stats.count) : '—';
 
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'data-retry-btn';
+      retry.textContent = '↻';
+      retry.title = 'Retry this feed now';
+      retry.setAttribute('aria-label', `Retry ${layer.name} feed`);
+      retry.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        retry.disabled = true;
+        retry.classList.add('spinning');
+        try {
+          await this.refreshLayer(layer.id);
+        } catch (error) {
+          console.warn(`[Data] ${layer.id} manual retry error:`, error);
+        } finally {
+          retry.classList.remove('spinning');
+          this._refreshTogglePanel();
+        }
+      });
+      this._syncRetryButton(retry, layer);
+
       const toggle = document.createElement('button');
       toggle.className = `data-toggle-btn${layer.enabled ? ' active' : ''}`;
       this._syncToggleButton(toggle, layer);
@@ -2057,6 +2078,7 @@ export class DataLayerManager {
       });
 
       right.appendChild(count);
+      right.appendChild(retry);
       right.appendChild(toggle);
       topRow.appendChild(left);
       topRow.appendChild(right);
@@ -2193,6 +2215,11 @@ export class DataLayerManager {
         this._syncToggleButton(btn, layer);
       }
 
+      const retryBtn = row.querySelector('.data-retry-btn');
+      if (retryBtn) {
+        this._syncRetryButton(retryBtn, layer);
+      }
+
       const count = row.querySelector('.data-count');
       if (count) {
         count.textContent = layer.stats.count ? this._formatCount(layer.stats.count) : '—';
@@ -2249,6 +2276,26 @@ export class DataLayerManager {
       return `${source} · ${stats.loadingLabel.trim()}`;
     }
     return `${source} · ${ago}`;
+  }
+
+  /**
+   * Shows the per-row retry button only when there's actually something to
+   * retry: the layer is on, not mid-transition, and its feed needs
+   * attention (degraded/stale/fallback/unavailable). A healthy or disabled
+   * layer hides it rather than offering a no-op button.
+   * @param {HTMLButtonElement} button
+   * @param {object} layer Registered layer entry (as returned by getAll()).
+   */
+  _syncRetryButton(button, layer) {
+    const transitioning = layer.lifecycleState === 'enabling' || layer.lifecycleState === 'disabling';
+    const feedState = layer.enabled ? layerFeedState(layer.stats) : 'off';
+    const needsAttention = ['degraded', 'stale', 'fallback', 'unavailable'].includes(feedState);
+    const show = layer.enabled && !transitioning && !layer.lifecycleUncertain && needsAttention;
+    button.hidden = !show;
+    if (!show) return;
+    const refreshing = Boolean(layer.stats?.refreshing) || button.classList.contains('spinning');
+    button.disabled = refreshing;
+    button.classList.toggle('spinning', refreshing);
   }
 
   _syncToggleButton(button, layer) {

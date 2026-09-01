@@ -304,6 +304,12 @@ const LEFT_STACK_OBSTACLE_SELECTOR = [
   '#gev-voice-control',
   '#pp-toggles',
   '#param-slider-panel',
+  // Fixed-position bottom-left widgets added alongside movable panels — see
+  // src/cameraControls.js and src/settingsDialog.js. Without these the
+  // corridor can allocate a data-panel/cctv-panel/scene-panel height tall
+  // enough to sit visually under them.
+  '.camctl-pad',
+  '.gev-settings-toggle',
 ].join(', ');
 /**
  * Whether an element currently occupies screen space a layout must respect.
@@ -353,6 +359,10 @@ const RIGHT_STACK_OBSTACLE_SELECTOR = [
   '#cesium-credits .cesium-credit-textContainer',
   '#command-dock',
   '#gev-voice-control',
+  // Fixed-position bottom-right widget added alongside the GPS track loader
+  // — see src/gpsTrackPanel.js. Keeps an expanded global-context-panel from
+  // growing down underneath it.
+  '.gps-track-toggle',
 ].join(', ');
 /** Display labels shown in the mini-status readout for each active style. */
 const STYLE_STATUS_LABELS = {
