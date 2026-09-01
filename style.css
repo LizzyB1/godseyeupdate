@@ -5,7 +5,12 @@
 
 :root {
   --bg-dark: #0a0a0f;
-  --glass-bg: rgba(12, 12, 20, 0.72);
+  /* Alpha channel driven live by the settings dialog's transparency slider
+     (src/settingsDialog.js) — every panel/box/chip below reads its
+     background through this one shared token, so one slider adjusts all of
+     them at once. */
+  --gev-panel-bg-alpha: 0.72;
+  --glass-bg: rgba(12, 12, 20, var(--gev-panel-bg-alpha));
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-border-hover: rgba(255, 255, 255, 0.15);
   --accent: #00d4ff;
@@ -613,8 +618,8 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 .panel-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: 10px;
+  margin-bottom: 10px;
   padding: 0 4px;
 }
 
@@ -631,16 +636,16 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 
 .panel-mini-label {
   font-family: var(--font-mono);
-  font-size: 8px;
-  letter-spacing: 1.4px;
+  font-size: 10px;
+  letter-spacing: 1.2px;
   color: var(--text-dim);
   text-transform: uppercase;
 }
 
 .panel-mini-value {
   font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 1.8px;
+  font-size: 11px;
+  letter-spacing: 1.6px;
   color: var(--accent);
   text-transform: uppercase;
   text-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
@@ -679,8 +684,8 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 
 .panel-title {
   font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 3px;
+  font-size: 11px;
+  letter-spacing: 2.6px;
   color: var(--text-dim);
   text-transform: uppercase;
   white-space: nowrap;
@@ -693,8 +698,8 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 }
 
 .panel-collapse-btn {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.03);
@@ -4424,7 +4429,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--panel-radius);
-  padding: 14px 16px 12px;
+  padding: 10px 12px 10px;
   backdrop-filter: blur(24px) saturate(1.4);
   -webkit-backdrop-filter: blur(24px) saturate(1.4);
   box-shadow:
@@ -4467,7 +4472,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 }
 
 .data-toggle-row {
-  padding: 8px 10px 6px;
+  padding: 6px 8px 5px;
   border-radius: 8px;
   transition: background var(--transition-fast);
 }
@@ -5139,7 +5144,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   display: flex;
   min-height: 0;
   flex-direction: column;
-  padding: 14px 16px 12px;
+  padding: 10px 12px 10px;
   border: 1px solid var(--glass-border);
   border-radius: var(--panel-radius);
   background: var(--glass-bg);
@@ -5815,7 +5820,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 
 .data-name {
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text-primary);
   letter-spacing: 0.3px;
@@ -5829,18 +5834,47 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 
 .data-count {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   letter-spacing: 0.5px;
   color: var(--text-secondary);
-  min-width: 30px;
+  min-width: 34px;
   text-align: right;
 }
 
+.data-retry-btn[hidden] {
+  display: none;
+}
+.data-retry-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: #ffbe52;
+  background: rgba(255, 174, 51, 0.1);
+  border: 1px solid rgba(255, 190, 82, 0.5);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.data-retry-btn:hover {
+  background: rgba(255, 174, 51, 0.2);
+  border-color: rgba(255, 190, 82, 0.85);
+}
+.data-retry-btn:disabled { cursor: default; opacity: 0.7; }
+.data-retry-btn.spinning { animation: gev-retry-spin 0.9s linear infinite; }
+@keyframes gev-retry-spin {
+  to { transform: rotate(360deg); }
+}
+
 .data-toggle-btn {
-  padding: 3px 10px;
+  padding: 4px 10px;
   font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 1.5px;
+  font-size: 10px;
+  letter-spacing: 1.3px;
   color: var(--text-dim);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -5848,7 +5882,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   cursor: pointer;
   transition: all var(--transition-fast);
   outline: none;
-  min-width: 38px;
+  min-width: 42px;
   text-align: center;
 }
 
@@ -5857,8 +5891,8 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 .data-toggle-btn.feed-stale,
 .data-toggle-btn.feed-fallback,
 .data-toggle-btn.feed-unavailable {
-  min-width: 82px;
-  letter-spacing: 0.8px;
+  min-width: 92px;
+  letter-spacing: 0.7px;
 }
 
 .data-toggle-btn:hover {
@@ -5897,8 +5931,8 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 
 .data-toggle-meta {
   font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.5px;
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
   color: var(--text-dim);
   padding-left: 26px;
   margin-top: 2px;
@@ -6013,7 +6047,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--panel-radius);
-  padding: 14px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -6435,7 +6469,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--panel-radius);
-  padding: 14px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
   max-height: calc(100vh - 24px);
@@ -9161,3 +9195,565 @@ body.scene-playback-mode #first-run-launcher {
   /* Scrolling a tile into view must not animate either. */
   .first-run-choices { scroll-behavior: auto; }
 }
+
+/* ═══════════════════════════════════════════════
+   Camera Look/Rotate/Zoom Pad (src/cameraControls.js)
+   Arrows/WASD look, corner cells = diagonals, Q/E roll, R/F zoom.
+   ═══════════════════════════════════════════════ */
+.camctl-pad {
+  position: fixed;
+  left: 24px;
+  bottom: calc(2vh + 4.5rem);
+  z-index: 146;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.camctl-pad > * { pointer-events: auto; }
+
+.camctl-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 34px);
+  grid-template-rows: repeat(3, 34px);
+  grid-template-areas:
+    'nw n ne'
+    'w i e'
+    'sw s se';
+  gap: 4px;
+}
+.camctl-nw { grid-area: nw; }
+.camctl-n { grid-area: n; }
+.camctl-ne { grid-area: ne; }
+.camctl-w { grid-area: w; }
+.camctl-e { grid-area: e; }
+.camctl-sw { grid-area: sw; }
+.camctl-s { grid-area: s; }
+.camctl-se { grid-area: se; }
+
+.camctl-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--btn-radius);
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  color: var(--text-secondary);
+  font: 600 14px/1 var(--font-sans);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast), box-shadow var(--transition-fast);
+}
+.camctl-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--glass-border-hover);
+}
+.camctl-btn.is-active,
+.camctl-btn:active {
+  color: var(--bg-dark);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 16px var(--accent-glow);
+}
+
+.camctl-info {
+  grid-area: i;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--text-dim);
+  font: 700 11px/1 var(--font-mono);
+  cursor: help;
+}
+
+.camctl-aux {
+  display: flex;
+  gap: 10px;
+}
+.camctl-aux-btn {
+  font: 700 15px/1 var(--font-mono);
+}
+
+.camctl-legend {
+  font: 500 9px/1.4 var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  text-align: center;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(9, 18, 27, 0.6);
+}
+
+@media (max-width: 720px), (max-height: 520px) {
+  .camctl-pad { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .camctl-btn { transition: none; }
+}
+
+/* ── GPS track loader (module loader for the NMEA/GPX toolkit) ───────────── */
+
+.gps-track-toggle {
+  position: fixed;
+  right: 24px;
+  bottom: calc(2vh + 4.5rem);
+  z-index: 146;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--btn-radius);
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  color: var(--text-secondary);
+  font: 600 12px/1 var(--font-sans);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast), box-shadow var(--transition-fast);
+}
+.gps-track-toggle:hover { color: var(--text-primary); border-color: var(--glass-border-hover); }
+.gps-track-toggle.is-active {
+  color: var(--bg-dark);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 16px var(--accent-glow);
+}
+
+.gps-track-panel[hidden] {
+  display: none;
+}
+.gps-track-panel {
+  position: fixed;
+  right: 24px;
+  bottom: calc(2vh + 8rem);
+  z-index: 147;
+  width: min(320px, calc(100vw - 48px));
+  max-height: min(60vh, 560px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--panel-radius);
+  background: var(--glass-bg);
+  backdrop-filter: blur(24px) saturate(1.3);
+  -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.gps-track-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--glass-border);
+  font: 700 11px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+.gps-track-panel__close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.gps-track-panel__close:hover { color: var(--text-primary); }
+
+.gps-track-panel__drop {
+  margin: 12px;
+  padding: 16px 12px;
+  border: 1.5px dashed var(--glass-border);
+  border-radius: 10px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.gps-track-panel__drop:hover,
+.gps-track-panel__drop:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  outline: none;
+}
+.gps-track-panel__drop.is-dragover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  box-shadow: 0 0 20px var(--accent-glow) inset;
+}
+.gps-track-panel__drop-label {
+  font: 600 12px/1.4 var(--font-sans);
+  color: var(--text-primary);
+}
+.gps-track-panel__drop-sub {
+  margin-top: 4px;
+  font: 400 10.5px/1.4 var(--font-sans);
+  color: var(--text-secondary);
+}
+
+.gps-track-panel__status {
+  padding: 0 12px 8px;
+  font: 500 11px/1.4 var(--font-mono);
+  color: var(--text-secondary);
+  min-height: 1em;
+}
+.gps-track-panel__status.is-error { color: #ff6b6b; }
+
+.gps-track-panel__list {
+  overflow-y: auto;
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gps-track-row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: rgba(9, 18, 27, 0.4);
+}
+.gps-track-row.is-hidden { opacity: 0.5; }
+.gps-track-row__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+.gps-track-row__meta { min-width: 0; }
+.gps-track-row__name {
+  font: 600 11.5px/1.3 var(--font-sans);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gps-track-row__sub {
+  font: 400 10px/1.3 var(--font-mono);
+  color: var(--text-secondary);
+}
+.gps-track-row__btn {
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 10px/1 var(--font-sans);
+  padding: 5px 7px;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+.gps-track-row__btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.gps-track-row__btn--danger:hover { color: #ff6b6b; border-color: #ff6b6b; }
+
+@media (max-width: 720px), (max-height: 520px) {
+  .gps-track-toggle,
+  .gps-track-panel { display: none; }
+}
+
+/* ── Movable HUD panels (src/panelDrag.js) ────────────────────────────────
+ * pp-toggles / data-panel / cctv-panel / scene-panel can be dragged free of
+ * their managed left-stack/right-rail flow by a grip planted in their
+ * header. Undocking reparents the panel to <body>, which drops it out of
+ * the stack-scoped rules that size its scroll container (e.g.
+ * `#left-panel-stack > #data-panel:not(.collapsed) .data-panel-inner`) —
+ * this block reproduces an equivalent bounded, scrollable box for the
+ * floating state so a long list doesn't grow the panel off-screen.
+ */
+
+.gev-panel-grip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: grab;
+  border-radius: 5px;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+.gev-panel-grip:hover { color: var(--accent); background: rgba(255, 255, 255, 0.06); }
+.gev-panel-grip:active { cursor: grabbing; }
+
+.gev-panel-undocked {
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+}
+.gev-panel-undocked:not(.collapsed) {
+  max-height: calc(100vh - 24px);
+}
+.gev-panel-undocked .data-panel-inner,
+.gev-panel-undocked .cctv-panel-inner,
+.gev-panel-undocked .scene-panel-inner {
+  height: 100%;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  box-sizing: border-box;
+}
+.gev-panel-undocked .panel-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--glass-bg);
+}
+/* pp-toggles undocked: its default rule pins it via flex align-items on a
+ * parent it no longer has — give it an explicit width once floating. */
+.gev-panel-undocked#pp-toggles {
+  width: var(--pp-expanded-width, 220px);
+}
+
+.gev-panel-dragging {
+  transition: none !important;
+  opacity: 0.94;
+  cursor: grabbing;
+}
+.gev-panel-dragging .gev-panel-grip { cursor: grabbing; }
+
+.gev-panel-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 3;
+}
+.gev-panel-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  width: 3px;
+  height: 28px;
+  transform: translateY(-50%);
+  border-radius: 3px;
+  background: var(--glass-border);
+  transition: background var(--transition-fast);
+}
+.gev-panel-resize-handle:hover::after,
+.gev-panel-resize-handle.is-active::after {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+@media (max-width: 720px), (max-height: 520px) {
+  .gev-panel-grip,
+  .gev-panel-resize-handle { display: none; }
+}
+
+/* ── Settings dialog (src/settingsDialog.js) ──────────────────────────────
+ * Gear icon, top-left — the one on-screen corner nothing else claims by
+ * default. Panel transparency slider, browser-local API key overrides, and
+ * a reset for the draggable-panel positions above.
+ */
+
+.gev-settings-toggle {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 148;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--btn-radius);
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  color: var(--text-secondary);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast), transform var(--transition-fast);
+}
+.gev-settings-toggle:hover { color: var(--text-primary); border-color: var(--glass-border-hover); }
+.gev-settings-toggle.is-active {
+  color: var(--bg-dark);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 16px var(--accent-glow);
+  transform: rotate(45deg);
+}
+
+.gev-settings-backdrop[hidden] {
+  display: none;
+}
+.gev-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 6, 10, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.gev-settings-dialog {
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(84vh, 720px);
+  overflow-y: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--panel-radius);
+  background: rgba(10, 11, 16, 0.94);
+  backdrop-filter: blur(28px) saturate(1.3);
+  -webkit-backdrop-filter: blur(28px) saturate(1.3);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  padding: 4px 0 16px;
+}
+
+.gev-settings-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--glass-border);
+  background: rgba(10, 11, 16, 0.94);
+  font: 700 11px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--accent);
+}
+.gev-settings-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.gev-settings-close:hover { color: var(--text-primary); }
+
+.gev-settings-section {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.gev-settings-section:last-child { border-bottom: none; }
+
+.gev-settings-section-title {
+  margin: 0 0 4px;
+  font: 700 11px/1.3 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+.gev-settings-section-help {
+  margin: 0 0 10px;
+  font: 400 11.5px/1.5 var(--font-sans);
+  color: var(--text-secondary);
+}
+.gev-settings-section-help code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.gev-settings-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.gev-settings-slider-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.gev-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+}
+.gev-settings-field-label {
+  font: 600 11.5px/1.3 var(--font-sans);
+  color: var(--text-primary);
+}
+.gev-settings-input {
+  padding: 7px 9px;
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font: 400 12px/1.3 var(--font-mono);
+}
+.gev-settings-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+.gev-settings-field-help {
+  font: 400 10.5px/1.4 var(--font-sans);
+  color: var(--text-dim);
+}
+
+.gev-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.gev-settings-btn {
+  padding: 7px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font: 600 11px/1 var(--font-sans);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.gev-settings-btn:hover { color: var(--text-primary); border-color: var(--glass-border-hover); }
+.gev-settings-btn-primary {
+  color: var(--bg-dark);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.gev-settings-btn-primary:hover { color: var(--bg-dark); box-shadow: 0 0 12px var(--accent-glow); }
+
+.gev-settings-status {
+  margin: 10px 16px 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font: 500 11px/1.4 var(--font-sans);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.gev-settings-status.visible { opacity: 1; }

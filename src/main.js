@@ -30,10 +30,21 @@ import {
   holdContinuousRender,
   releaseContinuousRender,
 } from './renderGovernor.js';
-import { installScopeMask } from './scopeMask.js';
+import { installScopeMask, setScopeMaskEnabled } from './scopeMask.js';
+import { initCameraControls } from './cameraControls.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
+import { initGpsTrackOverlay } from './data/gpsTracks.js';
+import { initGpsTrackPanel } from './gpsTrackPanel.js';
+import { initPanelDragging } from './panelDrag.js';
+import { resolveApiKey } from './apiKeys.js';
+import { initSettingsDialog } from './settingsDialog.js';
 
 initLogoGaze();
+// Independent of the Cesium bootstrap below (and its try/catch): a missing
+// GOOGLE_MAPS_API_KEY throws before the viewer ever exists, and this is the
+// one recovery path for that case — a person can open Settings and add a
+// key without editing .env on disk. See src/settingsDialog.js.
+window.__godsEyeView = { ...(window.__godsEyeView || {}), settingsDialog: initSettingsDialog() };
 
 /**
  * Extract a human-readable error message from any thrown value.
@@ -73,16 +84,18 @@ async function init() {
   try {
     loaderStatus.textContent = 'Configuring viewer...';
 
-    // Set Cesium Ion token for World Terrain
-    const cesiumToken = import.meta.env.CESIUM_ION_TOKEN;
+    // Set Cesium Ion token for World Terrain — a browser-saved override
+    // (settings dialog) takes priority over the build-time .env value; see
+    // src/apiKeys.js for why editing .env directly isn't possible here.
+    const cesiumToken = resolveApiKey('CESIUM_ION_TOKEN', import.meta.env.CESIUM_ION_TOKEN);
     if (cesiumToken) {
       Cesium.Ion.defaultAccessToken = cesiumToken;
     }
 
     // Set Google Maps API key for 3D Tiles
-    const googleApiKey = import.meta.env.GOOGLE_MAPS_API_KEY;
+    const googleApiKey = resolveApiKey('GOOGLE_MAPS_API_KEY', import.meta.env.GOOGLE_MAPS_API_KEY);
     if (!googleApiKey) {
-      throw new Error('GOOGLE_MAPS_API_KEY not found. Set it as an environment variable.');
+      throw new Error('GOOGLE_MAPS_API_KEY not found. Set it as an environment variable, or add it in Settings (gear icon).');
     }
     Cesium.GoogleMaps.defaultApiKey = googleApiKey;
 
@@ -280,6 +293,29 @@ async function init() {
     // see src/scopeMask.js. Installed before the UI so the DISPLAY-rail
     // toggle finds it live.
     installScopeMask(viewer);
+    // Ships OFF by default: the circular keyhole crop and its edge shading
+    // no longer clip the view down from a full rectangular display — the
+    // Scope button (#scope-toggle, default markup kept in sync in index.html)
+    // still lets an operator opt back into it.
+    setScopeMaskEnabled(false);
+
+    // Keyboard (arrows/WASD look, Q/E roll, R/F zoom) + on-screen pad camera
+    // controls — see src/cameraControls.js.
+    const cameraControls = initCameraControls(viewer);
+
+    // GPS track module loader: load raw NMEA logger dumps or GPX files
+    // (from the gps_manager.py / nmea_to_gpx.py toolkit) client-side and
+    // view them as glowing polyline overlays on the globe. Self-contained —
+    // see src/data/gpsTracks.js and src/gpsTrackPanel.js — not wired into
+    // DataLayerManager/LAYER_STATE_REGISTRY.
+    const gpsTrackOverlay = initGpsTrackOverlay(viewer);
+    const gpsTrackPanel = initGpsTrackPanel(gpsTrackOverlay);
+
+    // GUI overhaul: lets the DISPLAY, DATA LAYERS, CCTV, and SCENES panels be
+    // dragged free of their managed stacks — see src/panelDrag.js for why
+    // global-context-panel and the command-dock trays are intentionally left
+    // out (they lean on rail-scoped CSS this can't safely reproduce).
+    const panelDrag = initPanelDragging();
 
     // The follow camera recomputes the tracked target's dead-reckon position
     // every frame — tracking anything is a per-frame animation. (perf wave 2)
@@ -312,6 +348,7 @@ async function init() {
     syncVisibilitySuspension();
 
     window.__godsEyeView = {
+      ...window.__godsEyeView,
       viewer,
       styleManager,
       tileset,
@@ -321,6 +358,10 @@ async function init() {
       annotations,
       weatherEffects,
       cockpitCloudEffects,
+      cameraControls,
+      gpsTrackOverlay,
+      gpsTrackPanel,
+      panelDrag,
       getRenderGovernorDiagnostics,
       requestRender: governorRequestRender,
     };
