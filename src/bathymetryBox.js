@@ -91,7 +91,7 @@ export class BathymetryBox {
     section.appendChild(el(
       'div',
       'mapovl-hint',
-      'Isobaths: NOAA (public, no key). Depth readouts: GEBCO via opentopodata.org (public, no key, rate-limited — cached once looked up).',
+      'Isobaths and depth readouts: GEBCO grid via opentopodata.org (public, no key, rate-limited — cached once looked up).',
     ));
 
     body.appendChild(section);

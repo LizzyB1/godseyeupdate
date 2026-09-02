@@ -357,10 +357,11 @@ async function init() {
     const mapOverlayControls = initMapOverlayControls(mapOverlays);
     const coordinatesBox = initCoordinatesBox(mapOverlays);
 
-    // Bathymetry: undersea depth contours (NOAA) and depth markers (GEBCO
-    // via opentopodata.org) — both free, no API key. Self-contained, its
-    // own engine/box pair mirroring mapOverlays/mapOverlayControls above —
-    // see src/data/bathymetry.js and src/bathymetryBox.js.
+    // Bathymetry: undersea depth contours (self-computed via marching
+    // squares) and depth markers, both sampled from the GEBCO grid via
+    // opentopodata.org — free, no API key. Self-contained, its own
+    // engine/box pair mirroring mapOverlays/mapOverlayControls above — see
+    // src/data/bathymetry.js and src/bathymetryBox.js.
     const bathymetry = initBathymetry(viewer);
     const bathymetryBox = initBathymetryBox(bathymetry);
 
