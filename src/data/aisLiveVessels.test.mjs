@@ -843,6 +843,7 @@ function makeRecord(overrides = {}) {
     missedRefreshes: 0,
     position: POS,
     billboard: null,
+    inferredAnchored: false,
     ...overrides,
   };
 }
@@ -1336,8 +1337,47 @@ test('buildSelectedVesselCard: full detail card with MMSI + position time', () =
   assert.equal(card.title, 'EVER GIVEN');
   assert.deepEqual(card.details, [
     'CONTAINER SHIP · 14.5KT · 231°',
-    'MMSI 353136000 · POS: 11:22:33Z',
+    'MMSI 353136000 (Panama) · POS: 11:22:33Z',
   ]);
+});
+
+test('buildSelectedVesselCard: omits the flag parenthetical when the MMSI has no resolvable MID', () => {
+  const card = buildSelectedVesselCard(makeRecord({ mmsi: '000000000' }));
+  assert.deepEqual(card.details, [
+    'CONTAINER SHIP · 14.5KT · 231°',
+    'MMSI 000000000 · POS: LIVE',
+  ]);
+});
+
+// --- Feature B: inferred-anchored card marker -------------------------------
+
+test('buildVesselCard: an inferred-anchored vessel shows the ANCHORED? marker', () => {
+  const card = buildVesselCard(makeRecord({ inferredAnchored: true }));
+  assert.deepEqual(card.details, ['CONTAINER SHIP · 14.5KT · 231°', 'ANCHORED?']);
+});
+
+test('buildVesselCard: a non-anchored vessel never shows the ANCHORED? marker', () => {
+  const card = buildVesselCard(makeRecord({ inferredAnchored: false }));
+  assert.ok(!card.details.includes('ANCHORED?'));
+  assert.deepEqual(card.details, ['CONTAINER SHIP · 14.5KT · 231°']);
+});
+
+test('buildSelectedVesselCard: an inferred-anchored vessel shows the ANCHORED? marker ahead of destination/MMSI', () => {
+  const card = buildSelectedVesselCard(makeRecord({
+    inferredAnchored: true,
+    destination: 'ROTTERDAM',
+  }));
+  assert.deepEqual(card.details, [
+    'CONTAINER SHIP · 14.5KT · 231°',
+    'ANCHORED?',
+    '→ ROTTERDAM',
+    'MMSI 353136000 (Panama) · POS: LIVE',
+  ]);
+});
+
+test('buildSelectedVesselCard: a non-anchored vessel never shows the ANCHORED? marker', () => {
+  const card = buildSelectedVesselCard(makeRecord({ inferredAnchored: false }));
+  assert.ok(!card.details.includes('ANCHORED?'));
 });
 
 test('vessel host publication preserves the shipped grid winner and separation selector', () => {
@@ -1450,7 +1490,7 @@ test('buildSelectedVesselCard: destination line + STALE marker; placeholders for
   assert.deepEqual(card.details, [
     'TANKER · --KT · --°',
     '→ ROTTERDAM',
-    'MMSI 353136000 · POS: LIVE · STALE',
+    'MMSI 353136000 (Panama) · POS: LIVE · STALE',
   ]);
 });
 

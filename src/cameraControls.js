@@ -24,7 +24,7 @@ import { computeHorizontalForward, signedRollFromLevel } from './cameraMath.js';
  * `camera.position`, scaled by the same altitude-proportional speed used
  * throughout.
  *
- * 1 and 3 (and Left/Right arrow as a legacy alias) ORBIT the camera
+ * 1 and 3 (Left/Right arrow as a legacy alias, and Q/E) ORBIT the camera
  * around a ground focal point — wherever it was looking when the orbit
  * key was first pressed — rather than spinning in place around its own
  * eye position. Concretely, an orbit key press: (1) casts a ray from the
@@ -120,6 +120,7 @@ const KEY_TO_ACTION = {
   ArrowUp: 'lateralForward', ArrowDown: 'lateralBackward', ArrowLeft: 'orbitLeft', ArrowRight: 'orbitRight',
   KeyW: 'lateralForward', KeyS: 'lateralBackward', KeyA: 'lateralLeft', KeyD: 'lateralRight',
   Digit1: 'orbitLeft', Digit3: 'orbitRight',
+  KeyQ: 'orbitLeft', KeyE: 'orbitRight',
   KeyT: 'pitchUp', KeyG: 'pitchDown',
   KeyR: 'zoomIn', KeyF: 'zoomOut',
 };
@@ -140,8 +141,8 @@ const LATERAL_BUTTONS = [
  * point picked from wherever it's currently looking, instead of spinning
  * it in place — see the module doc comment above. */
 const ORBIT_BUTTONS = [
-  { actions: ['orbitLeft'], label: '↶', title: 'Orbit left around ground point (1 / Left)' },
-  { actions: ['orbitRight'], label: '↷', title: 'Orbit right around ground point (3 / Right)' },
+  { actions: ['orbitLeft'], label: '↶', title: 'Orbit left around ground point (1 / Left / Q)' },
+  { actions: ['orbitRight'], label: '↷', title: 'Orbit right around ground point (3 / Right / E)' },
 ];
 
 /** Dedicated pitch pair. */
@@ -355,7 +356,7 @@ function buildControlBox({ onPress, onRelease }) {
   // Orbit pair — swings around a ground focal point instead of spinning in place.
   const orbitRow = document.createElement('div');
   orbitRow.className = 'camctl-row';
-  orbitRow.title = 'Orbit around the ground point currently in view (1/Left, 3/Right)';
+  orbitRow.title = 'Orbit around the ground point currently in view (1/Left/Q, 3/Right/E)';
   for (const { actions, label, title: btnTitle } of ORBIT_BUTTONS) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -400,8 +401,8 @@ function buildControlBox({ onPress, onRelease }) {
 
   const legend = document.createElement('div');
   legend.className = 'camctl-legend';
-  legend.title = 'WASD/arrows slide across the ground (forward/back relative to where the camera faces) · 1/3/Left/Right orbit a ground point · T/G pitch · R/F zoom · mouse right-drag pitches · horizon is always kept level';
-  legend.textContent = 'WASD/arrows move · 1/3 orbit · T/G pitch · R/F zoom · horizon locked level';
+  legend.title = 'WASD/arrows slide across the ground (forward/back relative to where the camera faces) · 1/3/Left/Right/Q/E orbit a ground point · T/G pitch · R/F zoom · mouse right-drag pitches · horizon is always kept level';
+  legend.textContent = 'WASD/arrows move · 1/3/Q/E orbit · T/G pitch · R/F zoom · horizon locked level';
   body.appendChild(legend);
 
   return {

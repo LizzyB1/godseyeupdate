@@ -36,6 +36,12 @@ import {
   restoreSpriteOrderOnEnable,
 } from './spriteOrder.js';
 import {
+  projectVesselPosition,
+  VECTOR_NEAR_MINUTES,
+  VECTOR_FAR_MINUTES,
+} from './vesselVectorMath.js';
+import { trackLowSpeed } from './vesselAnchorState.js';
+import {
   advanceSpriteFocus,
   focusNowMs,
   focusAlphaNeedsWrite,
@@ -45,6 +51,7 @@ import {
 } from './focusDeemphasis.js';
 import { requestWorldFocus } from '../worldFocus.js';
 import { holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
+import { getFlagState } from './mmsiMid.js';
 
 const FOCUS_EVIDENCE_DEV = import.meta.env?.DEV === true;
 
@@ -85,6 +92,24 @@ const VESSEL_LIFT_M = 3;
 const TRAIL_MAX_POINTS = 400;
 /** Minimum movement (m) before a reconcile refresh appends a new trail point. */
 const TRAIL_MIN_MOVE_M = 25;
+
+/**
+ * Course/speed predictor vector (PRD-style ECDIS "where will it be" line):
+ * a solid near leg out to VECTOR_NEAR_MINUTES, then a dashed far leg from
+ * there out to VECTOR_FAR_MINUTES. The near leg is the confident part of the
+ * prediction — bright, full width; the far leg says "further out, less
+ * certain" via a lower alpha and a dashed material, the same visual grammar
+ * this app already uses for uncertain/estimated paths (rocketLaunches.js
+ * reentry legs).
+ */
+const VECTOR_NEAR_WIDTH_PX = 2;
+const VECTOR_FAR_WIDTH_PX = 1;
+const VECTOR_NEAR_ALPHA = 0.9;
+const VECTOR_FAR_ALPHA = 0.45;
+const VECTOR_FAR_DASH_LENGTH = 10;
+/** Same lift datum as the billboard anchor — the predictor line must ride the
+ *  sea surface, not clip below it (locked height-datum principle #1). */
+const VECTOR_HEIGHT_M = VESSEL_LIFT_M;
 
 const DEFAULT_VESSEL_OVERLAY_HOST = Object.freeze({
   setEntries: setOverlayEntries,
@@ -414,6 +439,9 @@ const aisLiveVesselsLayer = {
     if (state.billboardCollection && viewer) {
       viewer.scene.primitives.remove(state.billboardCollection);
     }
+    if (state.vectorCollection && viewer) {
+      viewer.scene.primitives.remove(state.vectorCollection);
+    }
     _vesselOverlayHost.clearSource(VESSEL_OVERLAY_SOURCE_ID);
     _vesselOverlayHost.setVisible(VESSEL_OVERLAY_SOURCE_ID, false);
     removeVesselInteraction();
@@ -693,6 +721,8 @@ const state = {
   firstConnectTimer: null,
   abort: null,
   billboardCollection: null,
+  /** @type {Cesium.PolylineCollection|null} Course/speed predictor vectors (Feature: predictor vectors). */
+  vectorCollection: null,
   /** @type {Array<Object>} Flat render list: keyed records + unkeyed records */
   vesselRecords: [],
   /** @type {Map<string, Object>} MMSI -> vessel record (identity across refreshes) */
@@ -973,6 +1003,15 @@ function ensureCollections(viewer) {
   state.billboardCollection.show = state.enabled;
   viewer.scene.primitives.add(state.billboardCollection);
   registerSpriteCollection('ais', state.billboardCollection);
+
+  // Predictor-vector lines are ordinary world-space polylines, not
+  // near-plane-clamped sprites — SPRITE_LAYER_ORDER (spriteOrder.js) only
+  // reasons about the fixed bottom-to-top sprite stack, so this collection
+  // is deliberately NOT registered there. Added once, right below the
+  // chevrons in insertion order, so a vessel's own vector never paints over
+  // its icon.
+  state.vectorCollection = new Cesium.PolylineCollection();
+  viewer.scene.primitives.add(state.vectorCollection);
 }
 
 /**
@@ -1050,10 +1089,19 @@ function reconcileVessels(viewer, rows) {
  */
 function addRecordPrimitives(record, occluder) {
   const visible = state.enabled && isVisible(record.surfacePosition, occluder);
+  // First sighting: seed the sustained-low-speed timer from this one reading
+  // instead of defaulting to "not anchored". A vessel the feed first picks
+  // up already sitting still (e.g. the layer is enabled mid-voyage-at-berth)
+  // must start counting from now, not silently wait a full
+  // ANCHOR_SUSTAIN_MS after some earlier moment nothing observed.
+  const anchorState = trackLowSpeed(null, record.speed, Date.now());
+  record.lowSpeedSinceMs = anchorState.lowSpeedSinceMs;
+  record.inferredAnchored = anchorState.inferredAnchored;
+
   record.billboard = state.billboardCollection.add({
     position: record.position,
     show: visible,
-    image: shipIcon(record, false),
+    image: vesselIconFor(record, false),
     scale: shipScale(record),
     // Screen-projected rotation lands on the next visibility/rotation pass.
     rotation: 0,
@@ -1067,6 +1115,7 @@ function addRecordPrimitives(record, occluder) {
     disableDepthTestDistance: Number.POSITIVE_INFINITY,
     id: record,
   });
+  updateVectorPrimitives(record);
 }
 
 /**
@@ -1079,7 +1128,14 @@ function addRecordPrimitives(record, occluder) {
  */
 function updateRecordInPlace(record, next) {
   const selected = record === state.selectedRecord;
-  const prevIcon = shipIcon(record, selected);
+  const prevIcon = vesselIconFor(record, selected);
+
+  // Sustained-low-speed tracking (Feature B): fold this refresh's speed
+  // reading into the PERSISTENT record's own prior tracking state — `next`
+  // is a throwaway freshly-normalized object with no history of its own, so
+  // `record` (not `next`) is the prevState — and do it BEFORE record.speed
+  // is overwritten below.
+  const anchorState = trackLowSpeed(record, next.speed, Date.now());
 
   record.lat = next.lat;
   record.lon = next.lon;
@@ -1096,16 +1152,24 @@ function updateRecordInPlace(record, next) {
   record.surfacePosition = next.surfacePosition;
   record.normal = next.normal;
   record.missedRefreshes = 0;
+  record.lowSpeedSinceMs = anchorState.lowSpeedSinceMs;
+  record.inferredAnchored = anchorState.inferredAnchored;
 
   if (record.billboard) {
     record.billboard.position = record.position;
     // Rotation is owned by the projected-rotation pass (updateVisibility).
     record.billboard.scale = shipScale(record) * (selected ? 1.2 : 1);
-    const nextIcon = shipIcon(record, selected);
+    const nextIcon = vesselIconFor(record, selected);
     if (nextIcon !== prevIcon) {
       record.billboard.image = nextIcon;
     }
   }
+  // Predictor-vector geometry (Feature A) only changes when the vessel's own
+  // position/course/speed change — i.e. right here, at refresh cadence — so
+  // it is recomputed on every reconcile, same as record.billboard.position
+  // just above. Occlusion-driven show/hide is a separate, per-800ms concern
+  // owned by updateVisibility (mirrors the billboard.rotation split there).
+  updateVectorPrimitives(record);
   if (record.mmsi === state.trailMmsi) {
     appendSelectedVesselTrailFix(record);
   }
@@ -1116,7 +1180,8 @@ function updateRecordInPlace(record, next) {
 }
 
 /**
- * Remove a record's billboard primitive from its collection.
+ * Remove a record's billboard and predictor-vector primitives from their
+ * collections.
  * @param {Object} record - Vessel record to tear down.
  */
 function removeRecordPrimitives(record) {
@@ -1126,6 +1191,12 @@ function removeRecordPrimitives(record) {
     state.billboardCollection.remove(record.billboard);
   }
   record.billboard = null;
+  if (state.vectorCollection) {
+    if (record.vectorNear) state.vectorCollection.remove(record.vectorNear);
+    if (record.vectorFar) state.vectorCollection.remove(record.vectorFar);
+  }
+  record.vectorNear = null;
+  record.vectorFar = null;
 }
 
 function normalizeVessel(row) {
@@ -1160,6 +1231,17 @@ function normalizeVessel(row) {
     normal,
     missedRefreshes: 0,
     billboard: null,
+    // Sustained-low-speed / predictor-vector fields (Features A & B). These
+    // start as defaults on every freshly normalized row; addRecordPrimitives
+    // seeds real tracking state for a brand-new record, and
+    // updateRecordInPlace carries the PERSISTENT record's own prior state
+    // forward for one already in state.vesselMap (never this throwaway
+    // object's own defaults — see updateRecordInPlace).
+    lowSpeedSinceMs: null,
+    inferredAnchored: false,
+    vectorNear: null,
+    vectorFar: null,
+    vectorEligible: false,
   };
 }
 
@@ -1214,6 +1296,173 @@ function shipIcon(record, selected) {
   return icon;
 }
 
+/**
+ * Build (and cache) the "inferred anchored" icon (Feature B): a hand-drawn
+ * anchor glyph in the vessel's type color, plus a small red "?" badge in the
+ * corner making clear this is a speed-inferred guess (see
+ * vesselAnchorState.js) and never an AIS-reported status. Deliberately ASCII
+ * only, like shipIcon — no Unicode glyph (e.g. "⚓") goes through btoa()
+ * here: btoa() only accepts Latin1 byte values, so a literal Unicode anchor
+ * character in the SVG source would throw in the browser the first time this
+ * runs. Cached alongside shipIcon in the same Map under an `anchor:` prefix
+ * so the two icon families' keys can never collide. Same 32x32 viewBox as
+ * shipIcon so billboard scale/anchoring behaves identically either way.
+ * @param {Object} record - Vessel record (drives per-type tint).
+ * @param {boolean} selected - True for the white/brighter selected variant.
+ * @returns {string} SVG data URL.
+ */
+function anchoredIcon(record, selected) {
+  const cssColor = selected ? '#ffffff' : vesselTypeCss(record.type);
+  const key = `anchor:${cssColor}:${selected ? 'selected' : 'normal'}`;
+  if (shipIconCache.has(key)) return shipIconCache.get(key);
+
+  const stroke = selected ? 'rgba(6,26,32,0.95)' : 'rgba(4,18,24,0.9)';
+  const strokeWidth = selected ? 1.1 : 0.7;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+    <g transform="translate(15,16)" fill="none" stroke="${cssColor}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="0" cy="-8" r="2.4" fill="${cssColor}" stroke="${stroke}" stroke-width="${strokeWidth}"/>
+      <line x1="0" y1="-5.6" x2="0" y2="9" />
+      <line x1="-4.5" y1="-3.5" x2="4.5" y2="-3.5" />
+      <path d="M-7,2 A7,7 0 0 0 0,9 A7,7 0 0 0 7,2" />
+    </g>
+    <circle cx="25" cy="8" r="6.5" fill="#ff453a" stroke="${stroke}" stroke-width="${strokeWidth}"/>
+    <text x="25" y="9" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="9" font-weight="700" fill="#ffffff">?</text>
+  </svg>`;
+  const icon = 'data:image/svg+xml;base64,' + btoa(svg);
+  shipIconCache.set(key, icon);
+  return icon;
+}
+
+/**
+ * Resolve the correct billboard icon for a vessel's current state: the
+ * moving-vessel chevron, or Feature B's inferred-anchored glyph once the
+ * sustained-low-speed tracker has flagged it. Centralizing the branch here
+ * keeps every billboard.image call site (creation, refresh, select,
+ * deselect) from having to remember it individually.
+ * @param {Object} record - Vessel record.
+ * @param {boolean} selected - True for the white/brighter selected variant.
+ * @returns {string} SVG data URL.
+ */
+function vesselIconFor(record, selected) {
+  return record.inferredAnchored ? anchoredIcon(record, selected) : shipIcon(record, selected);
+}
+
+/**
+ * Course to feed the predictor vector: heading preferred, course-over-ground
+ * fallback — the same preference order as vesselCourseDeg() — but this
+ * returns null (never a 0° default) when neither is known. vesselCourseDeg's
+ * 0° fallback is correct for billboard rotation (an unrotated icon has to
+ * point *somewhere*); it would be wrong here, where "no known direction"
+ * must suppress the vector rather than draw a fabricated due-north line.
+ * @param {Object} record - Vessel record.
+ * @returns {number|null}
+ */
+function vectorCourseDeg(record) {
+  const direction = record.heading ?? record.course;
+  return Number.isFinite(direction) ? direction : null;
+}
+
+/**
+ * Build a Cartesian3 for a predictor-vector vertex at the vessel's own
+ * sea-surface datum (geoid, h = N + VECTOR_HEIGHT_M) — the same anchor
+ * height-datum principle normalizeVessel() applies to record.position: at
+ * ellipsoid height 0 the line would clip below the photoreal sea mesh
+ * wherever the local geoid undulation N is positive (Rotterdam ≈ +45 m).
+ * @param {number} lat
+ * @param {number} lon
+ * @returns {Cesium.Cartesian3}
+ */
+function vesselVectorPosition(lat, lon) {
+  const heightM = vesselDatumHeightM(currentGeoidN(lat, lon), VECTOR_HEIGHT_M);
+  return Cesium.Cartesian3.fromDegrees(lon, lat, heightM);
+}
+
+/**
+ * Compute the predictor vector's two segments (0-6min, 6-20min) as
+ * Cartesian3 endpoint pairs, at the vessel's own sea-surface datum. Null
+ * when the vessel isn't eligible for a vector right now: no valid
+ * course-or-heading + speed (vesselVectorMath.js's own guard — course
+ * unknown, speed unknown, or speed <= 0), or Feature B has flagged it
+ * inferred-anchored — a vessel sitting still, possibly swinging on its
+ * chain, has no direction of travel worth drawing a line toward.
+ * @param {Object} record - Vessel record.
+ * @returns {{near: [Cesium.Cartesian3, Cesium.Cartesian3], far: [Cesium.Cartesian3, Cesium.Cartesian3]}|null}
+ */
+function computeVectorSegments(record) {
+  if (record.inferredAnchored) return null;
+  const courseDeg = vectorCourseDeg(record);
+  const nearPoint = projectVesselPosition(record.lat, record.lon, courseDeg, record.speed, VECTOR_NEAR_MINUTES);
+  if (!nearPoint) return null;
+  const farPoint = projectVesselPosition(record.lat, record.lon, courseDeg, record.speed, VECTOR_FAR_MINUTES);
+  if (!farPoint) return null; // defensive: cannot fail once nearPoint succeeded (same inputs, longer leg)
+
+  const vesselPos = vesselVectorPosition(record.lat, record.lon);
+  const nearPos = vesselVectorPosition(nearPoint.lat, nearPoint.lon);
+  const farPos = vesselVectorPosition(farPoint.lat, farPoint.lon);
+  return { near: [vesselPos, nearPos], far: [nearPos, farPos] };
+}
+
+/**
+ * (Re)compute a vessel's predictor-vector geometry and push it onto its two
+ * polyline handles, creating them on first call. Called at record-creation
+ * and refresh cadence only (addRecordPrimitives / updateRecordInPlace) —
+ * NEVER from the per-frame preRender loop — because geometry only changes
+ * when the vessel's own lat/lon/course/speed change, which happens at most
+ * once per REFRESH_MS. `record.vectorEligible` caches whether this vessel
+ * currently has a real vector at all, so updateVisibility's throttled
+ * 800 ms regularPass can toggle occlusion-driven show/hide (mirroring
+ * `record.billboard.show`) by reading a flag instead of recomputing the
+ * spherical-trig geometry — the same reason billboard rotation is throttled
+ * there rather than run every frame, just applied one step earlier since
+ * this geometry doesn't even need camera-pose-driven recompute at all.
+ * @param {Object} record - Vessel record.
+ */
+function updateVectorPrimitives(record) {
+  const collection = state.vectorCollection;
+  if (!collection) return;
+  const segments = computeVectorSegments(record);
+  record.vectorEligible = Boolean(segments);
+  const selected = record === state.selectedRecord;
+  const color = Cesium.Color.fromCssColorString(selected ? '#ffffff' : vesselTypeCss(record.type));
+  const nearColor = color.withAlpha(VECTOR_NEAR_ALPHA);
+  const farColor = color.withAlpha(VECTOR_FAR_ALPHA);
+
+  if (!record.vectorNear) {
+    record.vectorNear = collection.add({
+      positions: segments ? segments.near : [],
+      width: VECTOR_NEAR_WIDTH_PX,
+      material: Cesium.Material.fromType('Color', { color: nearColor }),
+      show: record.vectorEligible,
+    });
+  } else {
+    record.vectorNear.positions = segments ? segments.near : [];
+    record.vectorNear.material.uniforms.color = nearColor;
+    record.vectorNear.show = record.vectorEligible;
+  }
+
+  if (!record.vectorFar) {
+    record.vectorFar = collection.add({
+      positions: segments ? segments.far : [],
+      width: VECTOR_FAR_WIDTH_PX,
+      // Dashed material for the far (6-20min) leg — "further out, less
+      // certain" — the same dashed-line grammar this app already uses for
+      // estimated/uncertain paths (rocketLaunches.js reentry legs), adapted
+      // to the primitive Material API (Cesium.Material.fromType) rather than
+      // the Entity-only PolylineDashMaterialProperty those use, since a
+      // PolylineCollection primitive is required here for 12000-vessel scale.
+      material: Cesium.Material.fromType('PolylineDash', {
+        color: farColor,
+        dashLength: VECTOR_FAR_DASH_LENGTH,
+      }),
+      show: record.vectorEligible,
+    });
+  } else {
+    record.vectorFar.positions = segments ? segments.far : [];
+    record.vectorFar.material.uniforms.color = farColor;
+    record.vectorFar.show = record.vectorEligible;
+  }
+}
+
 function installRuntime(viewer) {
   if (state.preRenderRemover || !viewer) return;
   state.preRenderRemover = viewer.scene.preRender.addEventListener(() => updateVisibility());
@@ -1251,13 +1500,33 @@ function updateVisibility(force = false) {
       if (record.billboard) {
         record.billboard.show = visible;
         if (visible && doRotations && scene) {
-          const rot = screenProjectedRotation(
-            scene, record.position, vesselCourseDeg(record), record.billboard.rotation
-          );
-          if (rot !== null && Math.abs(rot - record.billboard.rotation) > 0.002) {
-            record.billboard.rotation = rot;
+          // Inferred-anchored (Feature B): a vessel sitting still, possibly
+          // swinging on its chain, has no real-world course worth trusting —
+          // running it through screenProjectedRotation would spin the
+          // anchor+"?" badge with every camera nudge. Force it upright.
+          if (record.inferredAnchored) {
+            if (record.billboard.rotation !== 0) record.billboard.rotation = 0;
+          } else {
+            const rot = screenProjectedRotation(
+              scene, record.position, vesselCourseDeg(record), record.billboard.rotation
+            );
+            if (rot !== null && Math.abs(rot - record.billboard.rotation) > 0.002) {
+              record.billboard.rotation = rot;
+            }
           }
         }
+      }
+      // Predictor-vector show/hide (Feature A): geometry itself is only ever
+      // recomputed at refresh cadence (updateVectorPrimitives), so this
+      // throttled 800 ms pass only combines the cached eligibility flag with
+      // this frame's horizon-occlusion result — mirrors record.billboard.show
+      // just above, at the same cadence, without re-touching geometry.
+      const vectorVisible = visible && Boolean(record.vectorEligible);
+      if (record.vectorNear && record.vectorNear.show !== vectorVisible) {
+        record.vectorNear.show = vectorVisible;
+      }
+      if (record.vectorFar && record.vectorFar.show !== vectorVisible) {
+        record.vectorFar.show = vectorVisible;
       }
       if (visible) labelCandidates.push(record);
     }
@@ -1573,9 +1842,14 @@ function selectVessel(record) {
   state.selectedRecord = record;
   record.missedRefreshes = 0;
   if (record.billboard) {
-    record.billboard.image = shipIcon(record, true);
+    record.billboard.image = vesselIconFor(record, true);
     record.billboard.scale = shipScale(record) * 1.2;
   }
+  // Recolor the predictor vector to the selected (white) variant — geometry
+  // itself is unchanged, but updateVectorPrimitives is the single place that
+  // knows how to touch these primitives, so reuse it rather than duplicating
+  // the material-recolor logic here.
+  updateVectorPrimitives(record);
   // Rebuild the card set immediately so the full-detail card appears on the
   // click, not up to VISIBILITY_UPDATE_MS later.
   updateVisibility(true);
@@ -1756,10 +2030,14 @@ function registerSelectedContext(record) {
 function clearSelection({ preserveTrail = false, evicted = false } = {}) {
   const record = state.selectedRecord;
   if (record?.billboard) {
-    record.billboard.image = shipIcon(record, false);
+    record.billboard.image = vesselIconFor(record, false);
     record.billboard.scale = shipScale(record);
   }
   state.selectedRecord = null;
+  // updateVectorPrimitives reads state.selectedRecord itself to pick the
+  // selected/unselected color, so it must run AFTER the null-out above —
+  // otherwise `record` would still read back as "selected" here.
+  if (record) updateVectorPrimitives(record);
   // Drop the full-detail card right away (no-op when the layer is disabled —
   // disable() clears the entry set itself).
   if (record && state.enabled) updateVisibility(true);
@@ -1787,11 +2065,12 @@ function updateSelectedVesselHud(record) {
 
   // Pinned vessels missing from recent refreshes get a stale marker
   const stale = (record.missedRefreshes || 0) > 0;
+  const flag = getFlagState(record.mmsi);
   el.classList.add('active');
   el.textContent = [
     `AIS: ${trimHudValue(record.name, 32)}`,
     `${trimHudValue(record.type || 'VESSEL', 24)}  SPD: ${formatSpeed(record.speed)}  HDG: ${formatHeading(record.heading ?? record.course)}`,
-    `MMSI: ${record.mmsi || '--'}  ${formatPositionTime(record)}${stale ? '  · STALE' : ''}`,
+    `MMSI: ${record.mmsi || '--'}${flag ? ` (${flag})` : ''}  ${formatPositionTime(record)}${stale ? '  · STALE' : ''}`,
   ].join('\n');
 }
 
@@ -1822,6 +2101,12 @@ export function buildVesselCard(record) {
   if (record.speed !== null && record.speed !== undefined) parts.push(formatSpeed(record.speed));
   const direction = record.heading ?? record.course;
   if (Number.isFinite(direction)) parts.push(`${Math.round(direction)}°`);
+  const details = parts.length ? [parts.join(' · ')] : [];
+  // Feature B: a distinct, unmissable line rather than folding it into the
+  // type/speed/heading line — an operator scanning a busy screen of cards
+  // should catch "this one's a guess, not a report" without having to parse
+  // the whole line.
+  if (record.inferredAnchored) details.push('ANCHORED?');
   return {
     id: vesselOverlayEntryId(record),
     actionable: Boolean(record?.mmsi),
@@ -1829,7 +2114,7 @@ export function buildVesselCard(record) {
     gapPx: 10,
     accent: accentForVesselType(record.type),
     title: trimHudValue(displayVesselName(record), 26),
-    details: parts.length ? [parts.join(' · ')] : [],
+    details,
     selected: false,
     priority: labelPriority(record, null),
   };
@@ -1850,10 +2135,15 @@ export function buildSelectedVesselCard(record) {
     formatSpeed(record.speed),
     Number.isFinite(direction) ? `${Math.round(direction)}°` : '--°',
   ].join(' · ')];
+  // Feature B: same standalone-line convention as buildVesselCard, placed
+  // right after the type/speed/course line so it reads first, ahead of the
+  // destination/MMSI detail.
+  if (record.inferredAnchored) details.push('ANCHORED?');
   const destination = String(record.destination || '').trim();
   if (destination) details.push(`→ ${trimHudValue(destination, 24)}`);
   const stale = (record.missedRefreshes || 0) > 0;
-  details.push(`MMSI ${record.mmsi || '--'} · ${formatPositionTime(record)}${stale ? ' · STALE' : ''}`);
+  const flag = getFlagState(record.mmsi);
+  details.push(`MMSI ${record.mmsi || '--'}${flag ? ` (${flag})` : ''} · ${formatPositionTime(record)}${stale ? ' · STALE' : ''}`);
   return {
     id: vesselOverlayEntryId(record),
     actionable: Boolean(record?.mmsi),
@@ -1926,6 +2216,9 @@ function setVisible(show) {
   if (state.billboardCollection) {
     state.billboardCollection.show = show;
   }
+  if (state.vectorCollection) {
+    state.vectorCollection.show = show;
+  }
   _vesselOverlayHost.setVisible(VESSEL_OVERLAY_SOURCE_ID, show);
 }
 
@@ -1953,6 +2246,7 @@ function resetState() {
   state.firstConnectTimer = null;
   state.abort = null;
   state.billboardCollection = null;
+  state.vectorCollection = null;
   state.vesselRecords = [];
   state.vesselMap = new Map();
   state.unkeyedRecords = [];
@@ -2008,6 +2302,11 @@ export function _setVesselStateForTest(options = {}) {
   );
   state.selectedRecord = options.selectedRecord || null;
   state.billboardCollection = options.billboardCollection || { remove() {} };
+  // Left null by default (not a fake): production code guards every vector
+  // touch on `state.vectorCollection` being set, so tests that don't care
+  // about predictor vectors need not provide one. Pass a real double
+  // (`{add, remove}`) via options to exercise vector creation/update paths.
+  state.vectorCollection = options.vectorCollection || null;
   state.trail = options.trail || null;
   state.trailMmsi = options.trailMmsi || null;
   state.trailPositions = Array.isArray(options.trailPositions) ? [...options.trailPositions] : [];
