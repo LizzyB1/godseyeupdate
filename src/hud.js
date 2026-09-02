@@ -62,8 +62,8 @@ const NEARBY_POINTS = Object.values(CITY_POIS)
 /**
  * Full-screen intelligence HUD overlay rendered on top of the Cesium canvas.
  *
- * Displays classification banners, orbital metadata, and a rolling semantic
- * summary line here in its own corner brackets. The MGRS/lat-lon/GSD/NIIRS/
+ * Displays the mode label and a rolling semantic summary line here in its
+ * own corner bracket. The MGRS/lat-lon/GSD/NIIRS/
  * ALT/SUN/AIS/COLL/ONA/bottom-line readouts are computed and written here
  * too, but rendered in `hudReadoutsBox.js`'s standalone box — see that
  * module and the file-level comment above. All values derive from the live
@@ -81,9 +81,7 @@ export class IntelHUD {
     this._currentStyle = 'normal';
     this._el = null;
     this._variant = 'tactical';
-    this._recBlinkState = true;
     this._updateInterval = null;
-    this._recBlinkInterval = null;
     this._timestampInterval = null;
     this._summaryInterval = null;
     this._summaryTypingInterval = null;
@@ -132,12 +130,6 @@ export class IntelHUD {
       }
     };
 
-    // Session-consistent pseudorandom identifiers (generated once at construction)
-    this._missionId = `KH11-${4000 + Math.floor(Math.random() * 200)}`;
-    this._sensorId = `OPS-${4100 + Math.floor(Math.random() * 100)}`;
-    this._orbitNum = 47000 + Math.floor(Math.random() * 1000);
-    this._passNum = 100 + Math.floor(Math.random() * 200);
-
     this._buildDOM();
     this.viewer.camera.moveEnd.addEventListener(this._onCameraMoveEnd);
     this._startTimers();
@@ -145,11 +137,15 @@ export class IntelHUD {
 
   /**
    * Construct the HUD DOM structure inside the existing `#intel-hud` element.
-   * Populates the classification/mission corner brackets and the static
-   * BAND/BITS/LVL edge strip. The numeric/text readout elements this used
-   * to also build here (MGRS, lat/lon, GSD/NIIRS, ALT/SUN, AIS, COLL, ONA,
-   * bottom line) are built by `hudReadoutsBox.js` instead — see the
-   * file-level comment — `_updateCameraData` still finds and writes them
+   * Populates the mode label, the rolling summary line, and the static
+   * BAND/BITS/LVL edge strip. Everything else that used to live in these
+   * corner brackets — the classification banner, the random per-session
+   * mission/sensor-ID line, the REC blink dot, and the ORB/PASS orbital
+   * line — was pure decoration with no real state behind it and has been
+   * removed outright (not relocated). The timestamp WAS a real live value,
+   * so it moved to `hudReadoutsBox.js` instead of being deleted — see the
+   * file-level comment. `_updateCameraData`/`_startTimers` still find and
+   * write MGRS/lat-lon/GSD/NIIRS/ALT/SUN/AIS/COLL/ONA/bottom-line/timestamp
    * by id regardless of which module created them.
    */
   _buildDOM() {
@@ -157,31 +153,15 @@ export class IntelHUD {
     if (!this._el) return;
 
     this._el.innerHTML = `
-      <div class="hud-top-bar">
-        <span class="hud-top-bar-left">TOP SECRET // SI-TK // NOFORN</span>
-        <span class="hud-top-bar-center">${this._missionId}</span>
-        <span class="hud-top-bar-right">PAGE 1/1</span>
-      </div>
-
       <div class="hud-corner hud-top-left">
         <div class="hud-bracket">┌</div>
         <div class="hud-content">
-          <div class="hud-classification">TOP SECRET // SI-TK // NOFORN</div>
-          <div class="hud-system">${this._missionId}  ${this._sensorId}</div>
           <div class="hud-mode" id="hud-mode">NORMAL</div>
           <div class="hud-summary-wrap">
             <div class="hud-summary-label">SUMMARY</div>
             <div class="hud-summary" id="hud-summary">Awaiting telemetry...</div>
           </div>
         </div>
-      </div>
-
-      <div class="hud-corner hud-top-right">
-        <div class="hud-content" style="text-align:right">
-          <div class="hud-rec"><span id="hud-rec-dot">●</span> REC  <span id="hud-timestamp">2026-01-01 00:00:00Z</span></div>
-          <div class="hud-orbital">ORB: ${this._orbitNum}  PASS: DESC-${this._passNum}</div>
-        </div>
-        <div class="hud-bracket">┐</div>
       </div>
 
       <div class="hud-edge hud-right-edge">
@@ -204,13 +184,6 @@ export class IntelHUD {
       const el = document.getElementById('hud-timestamp');
       if (el) el.textContent = this._formatUTC();
     }, 1000);
-
-    // REC blink — every 800ms
-    this._recBlinkInterval = setInterval(() => {
-      this._recBlinkState = !this._recBlinkState;
-      const dot = document.getElementById('hud-rec-dot');
-      if (dot) dot.style.visibility = this._recBlinkState ? 'visible' : 'hidden';
-    }, 800);
 
     // Camera-derived data — 4 updates/second (250ms)
     this._updateInterval = setInterval(() => {
@@ -829,7 +802,6 @@ export class IntelHUD {
   /** Tear down all running intervals. Call when discarding the HUD instance. */
   destroy() {
     clearInterval(this._updateInterval);
-    clearInterval(this._recBlinkInterval);
     clearInterval(this._timestampInterval);
     clearInterval(this._summaryInterval);
     clearInterval(this._summaryTypingInterval);

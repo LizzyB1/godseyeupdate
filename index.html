@@ -359,6 +359,7 @@
       <span class="pp-header-label">DISPLAY</span>
       <span class="panel-divider" aria-hidden="true"></span>
       <button class="panel-collapse-btn pp-collapse-btn" data-collapse-target="pp-toggles" title="Collapse panel">&#x25C0;</button>
+      <button class="panel-close-btn" data-close-target="pp-toggles" type="button" title="Hide panel" aria-label="Hide Display panel">&times;</button>
     </div>
     <div class="pp-toggle-group">
       <button class="pp-toggle-btn" id="hud-toggle" title="Intelligence HUD (H)">
@@ -450,6 +451,7 @@
       </button>
       <div id="control-panel-popover" class="dock-popover-content">
       <button class="dock-pin-btn" data-pin-target="control-panel" type="button" aria-label="Pin visual presets" aria-pressed="false" title="Keep visual presets open"><img src="/pin.svg" alt="" /></button>
+      <button class="panel-close-btn" data-close-target="control-panel" type="button" title="Hide panel" aria-label="Hide Visual Presets panel">&times;</button>
       <div id="style-buttons" class="button-grid">
         <button class="style-btn active" data-style="normal">
           <span class="btn-icon">◯</span>
@@ -509,6 +511,7 @@
       <div class="location-toolbar">
         <span class="location-toolbar-label"><span class="dock-label-icon dock-label-icon-location" aria-hidden="true"></span>LOCATION</span>
         <button class="panel-collapse-btn" data-collapse-target="location-bar" title="Collapse panel">+</button>
+        <button class="panel-close-btn" data-close-target="location-bar" type="button" title="Hide panel" aria-label="Hide Location panel">&times;</button>
       </div>
       <div id="location-mini-status" class="location-mini-status" aria-live="polite">
         <div id="location-mini-city" class="location-mini-city">📍 Location: --</div>
@@ -541,6 +544,7 @@
         <span class="panel-title">DATA LAYERS</span>
         <span class="panel-divider"></span>
         <button class="panel-collapse-btn" data-collapse-target="data-panel" title="Collapse panel">+</button>
+        <button class="panel-close-btn" data-close-target="data-panel" type="button" title="Hide panel" aria-label="Hide Data Layers panel">&times;</button>
       </div>
       <div id="data-toggles" class="data-toggle-list"></div>
     </div>
@@ -554,6 +558,7 @@
         <span class="panel-title">CCTV</span>
         <span class="panel-divider"></span>
         <button class="panel-collapse-btn" data-collapse-target="cctv-panel" title="Collapse panel">+</button>
+        <button class="panel-close-btn" data-close-target="cctv-panel" type="button" title="Hide panel" aria-label="Hide CCTV panel">&times;</button>
       </div>
       <div id="cctv-frame-wrap" class="cctv-frame-wrap">
         <img id="cctv-frame" alt="CCTV feed frame" />
@@ -680,6 +685,7 @@
             </div>
           </div>
           <button class="panel-collapse-btn" data-collapse-target="global-context-panel" title="Expand panel">▶</button>
+          <button class="panel-close-btn" data-close-target="global-context-panel" type="button" title="Hide panel" aria-label="Hide Context panel">&times;</button>
         </div>
         <div class="global-context-modes" role="tablist" aria-label="Context mode">
           <button id="global-context-flights-btn" class="context-mode-button" type="button" role="tab" tabindex="0" aria-selected="false" aria-controls="context-flights-view" aria-label="CONTACTS" title="Cycles the nearest contacts of whatever type you select — planes, vessels, installations. Satellites track independently.">

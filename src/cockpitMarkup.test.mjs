@@ -544,19 +544,15 @@ test('Cockpit panel corridors reserve the owned topline readouts', () => {
   );
   assert.match(
     signalLayout[1],
-    /resolveCockpitUtilityAnchor\(\{[\s\S]*?recBottom: recBounds \? recBounds\.bottom : 0,[\s\S]*?signalTop: signalBounds\.top,[\s\S]*?stripHeight: utilityBounds\.height,/,
-    'the strip hangs off the REC readout and is clamped by the briefing card it shares the margin with',
+    /resolveCockpitUtilityAnchor\(\{[\s\S]*?recBottom: 0,[\s\S]*?signalTop: signalBounds\.top,[\s\S]*?stripHeight: utilityBounds\.height,/,
+    'the Intel HUD REC readout was removed (pure decoration, no real recording state) — '
+      + 'the strip now falls through to its own minTop floor and is clamped by the briefing card',
   );
-  assert.match(signalLayout[1], /#intel-hud \.hud-top-right/);
-  assert.match(
-    signalLayout[1],
-    /const recBounds = isRenderedOnScreen\(recReadout\) \? recReadout\.getBoundingClientRect\(\) : null;/,
-    'HUD Off retires the Intel HUD with visibility/opacity, which leaves the REC '
-      + 'readout a rect — a rect test alone would anchor the strip to an invisible readout',
-  );
-  assert.match(
+  assert.doesNotMatch(
     ui,
-    /function isRenderedOnScreen\(element\) \{[\s\S]*?style\.display === 'none' \|\| style\.visibility === 'hidden' \|\| Number\(style\.opacity\) === 0[\s\S]*?rect\.width > 0 && rect\.height > 0;/,
+    /function isRenderedOnScreen\(/,
+    'isRenderedOnScreen existed only to anchor the strip to the now-removed REC readout '
+      + 'and must not linger as dead code once that anchor is gone',
   );
   assert.match(
     ui,

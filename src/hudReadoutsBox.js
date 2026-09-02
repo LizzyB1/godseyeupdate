@@ -3,13 +3,16 @@ import { buildMiniBox } from './miniBox.js';
 /**
  * @file Standalone "HUD Readouts" mini control box: the individual
  * intelligence-HUD data readouts — MGRS, lat/lon, GSD/NIIRS, ALT/SUN, AIS,
- * COLL, ONA, and the combined bottom line — that used to be baked
- * uncontrolled into `#intel-hud`'s corner brackets (see `hud.js`). They're
- * pure data sinks: `hud.js`'s `_updateCameraData()` and
- * `data/aisLiveVessels.js` write into them by element id exactly as
- * before — this module just owns where those elements physically live
- * (in their own movable/resizable/collapsible box, with a copy-to-
- * clipboard button) instead of fixed inside the cinematic HUD overlay.
+ * COLL, ONA, the combined bottom line, and the UTC timestamp — that used
+ * to be baked uncontrolled into `#intel-hud`'s corner brackets (see
+ * `hud.js`). They're pure data sinks: `hud.js`'s `_updateCameraData()`/
+ * `_startTimers()` and `data/aisLiveVessels.js` write into them by element
+ * id exactly as before — this module just owns where those elements
+ * physically live (in their own movable/resizable/collapsible box, with a
+ * copy-to-clipboard button) instead of fixed inside the cinematic HUD
+ * overlay. (The classification banner, mission/sensor-ID line, REC blink
+ * dot, and ORB/PASS orbital line were pure decoration with no real value
+ * behind them — those were deleted outright, not relocated.)
  *
  * These readouts only update while `hud.js`'s own visibility flag is on
  * (the Intel HUD toggle in the Display panel — see `IntelHUD#show`/
@@ -31,6 +34,7 @@ import { buildMiniBox } from './miniBox.js';
  * to keep writing into these by id.
  */
 const READOUTS = [
+  { id: 'hud-timestamp', text: '2026-01-01 00:00:00Z' },
   { id: 'hud-mgrs', text: 'MGRS: ---' },
   { id: 'hud-latlon', text: '--°--\'--"N ---°--\'--"W' },
   { id: 'hud-gsd', text: 'GSD: --m  NIIRS: --' },

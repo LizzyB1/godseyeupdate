@@ -4109,41 +4109,6 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   line-height: 1.6;
 }
 
-.hud-top-bar,
-.hud-bottom-bar {
-  display: none;
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(980px, calc(100vw - 120px));
-  border: 1px solid var(--hud-border);
-  background: rgba(0, 0, 0, 0.34);
-  padding: 4px 10px;
-  font-size: 10px;
-  letter-spacing: 1.4px;
-  justify-content: space-between;
-  align-items: center;
-  pointer-events: none;
-}
-
-.hud-top-bar {
-  top: 70px;
-}
-
-.hud-bottom-bar {
-  bottom: 110px;
-  justify-content: center;
-}
-
-.hud-top-bar-center {
-  opacity: 0.84;
-}
-
-.hud-top-bar-left,
-.hud-top-bar-right {
-  opacity: 0.6;
-}
-
 /* Corner blocks */
 .hud-corner {
   position: absolute;
@@ -4156,11 +4121,6 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 .hud-top-left {
   top: 120px;
   left: 36px;
-}
-
-.hud-top-right {
-  top: 120px;
-  right: 36px;
 }
 
 .hud-bottom-left {
@@ -4196,18 +4156,6 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   opacity: 0.95;
 }
 
-.hud-classification {
-  font-size: 12px;
-  letter-spacing: 2.5px;
-  font-weight: 600;
-  margin-bottom: 3px;
-}
-
-.hud-system {
-  font-size: 13px;
-  opacity: 0.8;
-}
-
 .hud-mode {
   font-size: 16px;
   font-weight: 700;
@@ -4235,24 +4183,6 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.hud-rec {
-  font-size: 13px;
-  letter-spacing: 2px;
-}
-
-#hud-rec-dot {
-  color: #ff3333;
-  text-shadow: 0 0 6px rgba(255, 51, 51, 0.8);
-  font-size: 14px;
-  vertical-align: middle;
-}
-
-.hud-orbital {
-  font-size: 12px;
-  opacity: 0.7;
-  letter-spacing: 1.5px;
 }
 
 /* Edge annotations (vertical text) */

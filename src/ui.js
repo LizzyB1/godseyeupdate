@@ -293,27 +293,6 @@ const LEFT_STACK_OBSTACLE_SELECTOR = [
   '.gev-settings-toggle',
 ].join(', ');
 /**
- * Whether an element currently occupies screen space a layout must respect.
- *
- * A rect alone is not enough: `visibility: hidden` and `opacity: 0` (how the
- * Intel HUD retires as a whole) leave the rect intact, so anything anchoring to
- * a HUD readout must walk the ancestors as well.
- *
- * @param {Element|null|undefined} element - Candidate element.
- * @returns {boolean} True when the element is painted and has area.
- */
-function isRenderedOnScreen(element) {
-  if (!element) return false;
-  for (let node = element; node instanceof Element; node = node.parentElement) {
-    const style = getComputedStyle(node);
-    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
-      return false;
-    }
-  }
-  const rect = element.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0;
-}
-/**
  * Fixed UI regions that can occupy the right control lane. Runtime rectangle
  * filtering keeps the rail clear of whichever HUD variant is currently
  * visible without tying the layout to one screen height.
@@ -2039,13 +2018,15 @@ class CockpitViewController {
       // Cockpit owns this anchor outright. The strip used to inherit the left
       // accordion's committed top, which is solved against left-lane obstacles
       // and dropped the strip straight through the briefing card below it.
-      // The readout only anchors the strip while it is genuinely on screen:
-      // the Minimal variant drops it with `display:none`, but HUD Off hides the
-      // whole Intel HUD with `visibility`/`opacity`, which keeps its rect.
-      const recReadout = document.querySelector('#intel-hud .hud-top-right');
-      const recBounds = isRenderedOnScreen(recReadout) ? recReadout.getBoundingClientRect() : null;
+      // This used to anchor under the Intel HUD's REC readout (`.hud-top-right`)
+      // while it was genuinely on screen — that readout was pure decoration
+      // (never tied to any real recording state) and has been removed, so
+      // there's nothing left to dodge there; `recBottom: 0` makes
+      // `resolveCockpitUtilityAnchor` fall straight through to its own
+      // `minTop` floor, same as it already did whenever the old readout was
+      // off-screen (Minimal HUD variant, or HUD Off).
       const utilityAnchor = resolveCockpitUtilityAnchor({
-        recBottom: recBounds ? recBounds.bottom : 0,
+        recBottom: 0,
         signalTop: signalBounds.top,
         stripHeight: utilityBounds.height,
         viewportHeight: window.innerHeight,
