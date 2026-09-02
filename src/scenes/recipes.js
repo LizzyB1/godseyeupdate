@@ -31,7 +31,7 @@ export const SCENE_RECIPES = [
     id: 'orbital-watch',
     title: 'Orbital Watch',
     durationSec: 32,
-    style: 'surveillance',
+    style: 'retro',
     ui: { hidePanels: true, hudMode: 'full', safeFrame: '16:9' },
     layers: {
       flights: false,
@@ -41,14 +41,6 @@ export const SCENE_RECIPES = [
     },
     post: {
       detectionMode: 'SPARSE',
-      styleParams: {
-        surveillance: {
-          gain: 0.62,
-          bloom: 0.38,
-          scanlineStr: 0.9,
-          pixelation: 2.1,
-        },
-      },
     },
     cameraPath: [
       { lat: 28.0, lon: -82.0, alt: 22000000, heading: 0, pitch: -82, roll: 0, duration: 7, hold: 1 },
@@ -62,7 +54,7 @@ export const SCENE_RECIPES = [
     id: 'thermal-threats',
     title: 'Thermal Threat Board',
     durationSec: 26,
-    style: 'thermal',
+    style: 'retro',
     ui: { hidePanels: true, hudMode: 'full', safeFrame: '16:9' },
     layers: {
       flights: false,
@@ -72,14 +64,6 @@ export const SCENE_RECIPES = [
     },
     post: {
       detectionMode: 'OFF',
-      styleParams: {
-        thermal: {
-          sensitivity: 0.84,
-          bloom: 0.78,
-          mode: 0.0,
-          pixelation: 1.9,
-        },
-      },
     },
     cameraPath: [
       { lat: 37.0, lon: -121.0, alt: 5200000, heading: 20, pitch: -62, roll: 0, duration: 5, hold: 1 },
@@ -92,7 +76,7 @@ export const SCENE_RECIPES = [
     id: 'city-overload',
     title: 'City Overload',
     durationSec: 30,
-    style: 'surveillance',
+    style: 'retro',
     ui: { hidePanels: true, hudMode: 'minimal', safeFrame: '9:16' },
     layers: {
       flights: true,
@@ -102,14 +86,6 @@ export const SCENE_RECIPES = [
     },
     post: {
       detectionMode: 'PANOPTIC',
-      styleParams: {
-        surveillance: {
-          gain: 0.68,
-          bloom: 0.42,
-          scanlineStr: 1.0,
-          pixelation: 2.4,
-        },
-      },
     },
     cameraPath: [
       { lat: 40.73, lon: -74.0, alt: 1500000, heading: 25, pitch: -44, roll: 0, duration: 5, hold: 1 },

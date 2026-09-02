@@ -2,9 +2,6 @@ import * as Cesium from 'cesium';
 import { retroShader } from './styles/retro.js';
 import { animeShader } from './styles/anime.js';
 import { noirShader } from './styles/noir.js';
-import { snowShader } from './styles/snow.js';
-import { nightVisionShader } from './styles/surveillance.js';
-import { thermalShader } from './styles/thermal.js';
 import { LOCATIONS, CITY_POIS, GLOBE_VIEW, flyToGlobeView, flyToPresetLocation, flyToPOI, searchAndFlyTo } from './locations.js';
 import { locationMiniStatus } from './locationStatus.js';
 import { interruptCameraMotion } from './cameraVerbs.js';
@@ -184,7 +181,7 @@ import {
 /** Duration (ms) for shader intensity crossfade between style presets. */
 const TRANSITION_DURATION_MS = 500;
 /** Map of style name to its GLSL shader module for post-process stages. */
-const STYLES = { retro: retroShader, surveillance: nightVisionShader, thermal: thermalShader, anime: animeShader, noir: noirShader, snow: snowShader };
+const STYLES = { retro: retroShader, anime: animeShader, noir: noirShader };
 /** Versioned localStorage namespace prefix to invalidate stale panel layouts. */
 const PANEL_LAYOUT_STORAGE_VERSION = 'v6';
 const SHARE_PANEL_STATE_SPECS = Object.freeze([
@@ -325,11 +322,8 @@ const RIGHT_STACK_OBSTACLE_SELECTOR = [
 const STYLE_STATUS_LABELS = {
   normal: 'NORMAL',
   retro: 'CRT',
-  surveillance: 'NVG',
-  thermal: 'FLIR',
   anime: 'ANIME',
   noir: 'NOIR',
-  snow: 'SNOW',
 };
 /**
  * The tactical detection look: Dense at 75%.
@@ -388,32 +382,6 @@ const STYLE_PRESET_DEFAULTS = {
     hudVisible: true,
     detection: MILITARY_DETECTION_PRESET,
   },
-  surveillance: {
-    styleParams: {
-      surveillance: {
-        gain: 0.18,
-        bloom: 0.22,
-        scanlineStr: 0.96,
-        pixelation: 1.0,
-      },
-    },
-    hudVariant: 'tactical',
-    hudVisible: true,
-    detection: MILITARY_DETECTION_PRESET,
-  },
-  thermal: {
-    styleParams: {
-      thermal: {
-        sensitivity: 0.85,
-        bloom: 0.2,
-        mode: 0.33,
-        pixelation: 1.0,
-      },
-    },
-    hudVariant: 'tactical',
-    hudVisible: true,
-    detection: MILITARY_DETECTION_PRESET,
-  },
 };
 
 /**
@@ -452,7 +420,7 @@ const SHARPEN_SHADER = /* glsl */ `
  *
  * Responsibilities:
  * - CesiumJS PostProcessStage pipeline: registers per-style GLSL stages
- *   (NVG, FLIR, CRT, anime, noir, snow) and manages intensity crossfades.
+ *   (CRT, anime, noir) and manages intensity crossfades.
  * - Draggable/collapsible panel system with localStorage persistence,
  *   z-order stacking, and viewport-clamped positioning.
  * - CCTV panel: camera selection, coverage toggle, projection, calibration
@@ -949,8 +917,8 @@ class CockpitViewController {
     const next = normalizeCockpitVisionMode(mode);
     this.visionMode = next;
     const inherited = String(this.getInheritedVisionLabel?.() || 'NORMAL').toUpperCase();
-    const labels = { optical: inherited, crt: 'CRT', nvg: 'NVG', thermal: 'FLIR', noir: 'NOIR' };
-    const names = { optical: inherited, crt: 'CRT', nvg: 'Night vision', thermal: 'Thermal', noir: 'Noir' };
+    const labels = { optical: inherited, crt: 'CRT', noir: 'NOIR' };
+    const names = { optical: inherited, crt: 'CRT', noir: 'Noir' };
     if (this.visionCurrent) {
       this.visionCurrent.dataset.cockpitVision = next;
       this.visionCurrent.setAttribute('aria-label', `Current cockpit vision style: ${names[next]}. Activate for next style.`);
@@ -2852,7 +2820,7 @@ export class StyleManager {
     for (const [name, shader] of Object.entries(STYLES)) {
       const uniforms = { intensity: 0.0 };
 
-      // Auto-detect time uniform — animated shaders (CRT scanlines, snow, etc.)
+      // Auto-detect time uniform — animated shaders (CRT scanlines, etc.)
       // declare `uniform float time` and receive elapsed seconds each frame.
       if (shader.fragmentShader.includes('uniform float time')) {
         uniforms.time = 0.0;
@@ -2907,7 +2875,7 @@ export class StyleManager {
    * intensity math — they write `uniforms.intensity` directly and know
    * nothing about the enabled/intensity lockstep _setStageIntensity owns.
    * Without this sweep a stage the policy raised to 1 would stay DISABLED
-   * and cockpit NVG/FLIR/CRT would render nothing at all.
+   * and cockpit CRT/NOIR would render nothing at all.
    * @returns {void}
    */
   _syncStagesEnabledFromIntensity() {
@@ -2976,7 +2944,7 @@ export class StyleManager {
     this._syncShareState();
   }
 
-  /** Apply a temporary cockpit-only CRT/NVG/FLIR/NOIR post-process override. */
+  /** Apply a temporary cockpit-only CRT/NOIR post-process override. */
   _setCockpitVision(mode, active, { revealParameters = false } = {}) {
     const next = active ? normalizeCockpitVisionMode(mode) : 'optical';
     if (!this.stages) return;
@@ -3008,21 +2976,24 @@ export class StyleManager {
     const target = applyCockpitVisionStageIntensities(this.stages, next, this._cockpitVisionRestore);
     this._syncStagesEnabledFromIntensity();
     this._cockpitVisionMode = next;
-    this._syncIrBoost(); // Cockpit vision override ('nvg'/'thermal' boost; CRT/NOIR clear)
+    this._syncIrBoost(); // Cockpit vision override; CRT/NOIR clear
     this._updateSliderPanel(target || null, { reveal: false });
     this._revealCockpitStyleParameters({ openDisplay: revealParameters });
   }
 
-  /** IR hot-target boost (field test 2026-08-16): under the luminance-
-   *  mapped NVG/FLIR looks the 3D fleets flip to flat white so contacts read
-   *  HOT instead of vanishing mid-gray; restored when the look exits. The
-   *  EFFECTIVE look is Cockpit's vision override while Cockpit is active
-   *  ('nvg'/'thermal', which can differ from the map preset in BOTH
-   *  directions), otherwise the map preset ('surveillance'/'thermal'). */
+  /** IR hot-target boost (field test 2026-08-16): under the luminance-mapped
+   *  NVG/FLIR looks the 3D fleets used to flip to flat white so contacts read
+   *  HOT instead of vanishing mid-gray, restored when the look exited. NVG and
+   *  FLIR (both the map style presets and the Cockpit-only vision modes) were
+   *  retired, so `effective` can no longer take a value this ever recognizes
+   *  and `irBoost` always resolves false — kept as a no-op pass-through
+   *  (rather than deleted outright) so the `irBoost` layer param plumbing in
+   *  data/flights.js and data/militaryFlights.js stays wired for a future IR
+   *  look without another multi-file threading pass. */
   _syncIrBoost() {
     const cockpitMode = this.cockpitView?.active ? this._cockpitVisionMode : null;
     const effective = cockpitMode && cockpitMode !== 'optical' ? cockpitMode : this.activeStyle;
-    const irBoost = effective === 'surveillance' || effective === 'thermal' || effective === 'nvg';
+    const irBoost = effective === '__retired_ir_look__';
     this._dataManager?.setLayerParams('flights', { irBoost });
     this._dataManager?.setLayerParams('military', { irBoost });
     // Fog blends distant geometry toward an effectively-BLACK color in this
@@ -3092,7 +3063,7 @@ export class StyleManager {
 
   /**
    * Wires up all primary UI event listeners: style buttons, keyboard shortcuts
-   * (1-8 style keys, H/O/V/F/D/C hotkeys, Escape), AI prompt input with
+   * (1-4 style keys, H/O/V/F/D/C hotkeys, Escape), AI prompt input with
    * debounce, HUD toggle, and clean-view toggle.
    * @returns {void}
    */
@@ -3102,10 +3073,10 @@ export class StyleManager {
       btn.addEventListener('click', () => this.setStyle(btn.dataset.style));
     });
 
-    // Keyboard shortcuts: 1-7, H, Escape
+    // Keyboard shortcuts: 1-4, H, Escape
     this._globalKeydownHandler = (e) => {
       // Ignore when interacting with a form control (except Escape). Global
-      // hotkeys ('1'-'7', 'h', 'o', 'v', 'd', 'c', 'f') otherwise fire while a
+      // hotkeys ('1'-'4', 'h', 'o', 'v', 'd', 'c', 'f') otherwise fire while a
       // <select> dropdown (e.g. HUD layout) is focused and its native
       // type-ahead is in use, or while typing in a text field (M9).
       const isFormControl = e.target?.matches?.('select, input, textarea')
@@ -3113,9 +3084,7 @@ export class StyleManager {
       if (isFormControl && e.key !== 'Escape') return;
 
       const keyMap = {
-        '1': 'normal', '2': 'retro', '3': 'surveillance',
-        '4': 'thermal', '5': 'anime', '6': 'noir',
-        '7': 'snow',
+        '1': 'normal', '2': 'retro', '3': 'anime', '4': 'noir',
       };
       if (keyMap[e.key]) this.setStyle(keyMap[e.key]);
       if (e.key === 'Escape') {
@@ -3378,7 +3347,7 @@ export class StyleManager {
 
   /**
    * Applies preset defaults (shader uniforms, HUD variant) when a
-   * military-class style (CRT, NVG, FLIR) is selected. Does nothing
+   * military-class style (CRT) is selected. Does nothing
    * for styles without entries in STYLE_PRESET_DEFAULTS.
    * @param {string} styleName - The style whose defaults to apply.
    * @returns {void}
@@ -8515,7 +8484,7 @@ export class StyleManager {
    * 2. Crossfades the new shader stage intensity to 1.
    * 3. Applies style preset defaults (shader uniforms/HUD) if applyPreset is true.
    * 4. Updates button highlights, style indicator, slider panel, HUD, and detection overlay.
-   * @param {string} styleName - Target style ('normal'|'retro'|'surveillance'|'thermal'|'anime'|'noir'|'snow').
+   * @param {string} styleName - Target style ('normal'|'retro'|'anime'|'noir').
    * @param {object} [options]
    * @param {boolean} [options.applyPreset=true] - Whether to apply STYLE_PRESET_DEFAULTS for the new style.
    * @returns {void}
@@ -8559,7 +8528,7 @@ export class StyleManager {
     });
 
     // Update style indicator
-    const displayNames = { surveillance: 'NVG', thermal: 'FLIR', retro: 'CRT' };
+    const displayNames = { retro: 'CRT' };
     this._styleIndicator.textContent = displayNames[styleName] || styleName.toUpperCase();
     this._updateStyleMiniStatus(styleName);
 
@@ -8700,8 +8669,8 @@ export class StyleManager {
           stage.uniforms.time = elapsedSec;
           // Chain mode keeps zero-intensity stages ENABLED for pass parity —
           // only a stage that is actually VISIBLE keeps the loop (and the
-          // continuous-render hold) alive, or a settled CRT session would
-          // hold the loop forever via an invisible snow stage.
+          // continuous-render hold) alive, or a settled Noir session would
+          // hold the loop forever via an invisible retro stage.
           if (stage.uniforms.intensity > 0.001) animatedStageVisible = true;
         }
       }

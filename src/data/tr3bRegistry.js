@@ -32,7 +32,7 @@ export const TR3B_TYPE_LABEL = 'TR-3B';
  * treats `aircraftClass` as a free-text field, so this is just one more value
  * to filter and group on, never an enum it has to know about. Deliberately the
  * STYLE-INDEPENDENT id, not the `tr3bHot` sprite variant: a query must return
- * the same answer in FLIR as in Normal.
+ * the same answer under any style as in Normal.
  */
 export const TR3B_CLASS = 'tr3b';
 

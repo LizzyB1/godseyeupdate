@@ -129,9 +129,9 @@ test('class colors are distinct, valid, and never borrow the military amber', ()
 });
 
 test('the dense shell stays dimmer than the class it sits among', () => {
-  // NVG/FLIR collapse the scene to Rec.601 luma, and DENSE mode puts thousands
-  // of COMMS points in the same LEO volume as VISUAL. Luma separation is what
-  // keeps the core catalog readable through the dense shell.
+  // A mono shader (noir) collapses the scene to Rec.601 luma, and DENSE mode
+  // puts thousands of COMMS points in the same LEO volume as VISUAL. Luma
+  // separation is what keeps the core catalog readable through the dense shell.
   const luma = (hex) => {
     const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
     return (0.299 * r + 0.587 * g + 0.114 * b) / 255;

@@ -250,8 +250,8 @@ let _lastRenderAltitude = 0;
  * Active post-FX style (StyleManager preset name), synced from
  * `document.documentElement.dataset.gevStyle` at init and the
  * `gev:style-change` window event thereafter. Drives the preset-aware dot
- * styling (`trafficPresetStyle.js`): NVG/FLIR/noir re-encode congestion in
- * luminance + size (their shaders discard hue), retro/CRT gets saturated
+ * styling (`trafficPresetStyle.js`): noir re-encodes congestion in
+ * luminance + size (its shader discards hue), retro/CRT gets saturated
  * hues + a size boost to survive pixelation. 'normal' → shipped palette.
  * @type {string}
  */
@@ -314,9 +314,10 @@ function refreshBucketColors() {
 
 /**
  * Apply the active preset's dark-halo outline to a colored dot (or clear
- * it back to the shipped no-outline state). NVG's auto-gain saturates the
- * scene, so brightness alone cannot separate a dot from a bright road —
- * the dark ring restores local contrast through every luma-mapping shader.
+ * it back to the shipped no-outline state). A mono preset's auto-gain
+ * saturates the scene, so brightness alone cannot separate a dot from a
+ * bright road — the dark ring restores local contrast through every
+ * luma-mapping shader.
  * @param {Cesium.PointPrimitive} point - The dot primitive.
  * @param {'free'|'slow'|'jam'|null} bucket - Flow bucket (null = sim).
  */
@@ -774,7 +775,7 @@ function spawnDotsForRoad(road, altitude, budgetCount = null) {
   const bucket = flow ? flowBucket(flow.level) : null;
   // Jam dots get +1px: a red queue should read as a queue at a glance.
   // Preset-aware styling adds its own size delta and floors the base (0 /
-  // no floor under the normal profile) so NVG/FLIR/CRT dots stay PRESENT.
+  // no floor under the normal profile) so noir/CRT dots stay PRESENT.
   const pixelSize = baseDotSize(road.type, bucket)
     + (bucket === 'jam' ? 1 : 0)
     + activeSizeDelta(bucket);
@@ -1539,7 +1540,7 @@ function rebuildHeatLines(roads) {
       geometry: new Cesium.GroundPolylineGeometry({ positions: c.road.waypoints, width }),
     }));
 
-  // Mono presets (NVG/FLIR/noir) discard hue — heat-lines re-encode in
+  // The mono preset (noir) discards hue — heat-lines re-encode in
   // luminance like the dots: jam = white glow, slow = faint gray.
   const monoHeat = _presetDots === 'on' && trafficStyleProfile(_stylePreset) === 'mono';
   const jamLineColor = monoHeat ? Cesium.Color.WHITE : HEAT_JAM_COLOR;

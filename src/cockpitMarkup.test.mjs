@@ -64,9 +64,9 @@ test('Cockpit heading tape leaves the bottom exit row unobstructed', () => {
   assert.doesNotMatch(css, /cockpit-compass-label/);
 });
 
-test('Cockpit vision cycle exposes exactly five real visual styles without NONE', () => {
+test('Cockpit vision cycle exposes exactly three real visual styles without NONE', () => {
   assert.match(ui, /const modes = COCKPIT_VISION_MODES;/);
-  assert.match(ui, /const labels = \{ optical: inherited, crt: 'CRT', nvg: 'NVG', thermal: 'FLIR', noir: 'NOIR' \};/);
+  assert.match(ui, /const labels = \{ optical: inherited, crt: 'CRT', noir: 'NOIR' \};/);
   assert.doesNotMatch(ui, /none: 'NONE'/);
   assert.match(ui, /getInheritedVisionLabel: \(\) => \([\s\S]*?STYLE_STATUS_LABELS\[this\.activeStyle\]/);
   assert.match(html, /id="cockpit-vision-current-label"[^>]*>NORMAL<\/strong>/);
@@ -75,7 +75,7 @@ test('Cockpit vision cycle exposes exactly five real visual styles without NONE'
   assert.match(
     ui,
     /if \(next === 'optical'\) \{[\s\S]*?applyCockpitVisionStageIntensities\(this\.stages, next, this\._cockpitVisionRestore\);[\s\S]*?return;[\s\S]*?const target = applyCockpitVisionStageIntensities/,
-    'the inherited entry must restore the map shader while CRT, NVG, FLIR, and NOIR remain temporary Cockpit overrides',
+    'the inherited entry must restore the map shader while CRT and NOIR remain temporary Cockpit overrides',
   );
   assert.match(
     ui,

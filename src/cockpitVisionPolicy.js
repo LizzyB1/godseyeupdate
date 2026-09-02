@@ -1,9 +1,7 @@
-export const COCKPIT_VISION_MODES = Object.freeze(['optical', 'crt', 'nvg', 'thermal', 'noir']);
+export const COCKPIT_VISION_MODES = Object.freeze(['optical', 'crt', 'noir']);
 
 const TARGET_STYLE_BY_MODE = Object.freeze({
   crt: 'retro',
-  nvg: 'surveillance',
-  thermal: 'thermal',
   noir: 'noir',
 });
 

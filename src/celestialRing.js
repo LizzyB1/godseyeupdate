@@ -1,7 +1,7 @@
 import * as Cesium from 'cesium';
 import { governorRequestRender } from './renderGovernor.js';
 
-/** Outer edge of the existing NVG/FLIR keyhole in normalized shader space. */
+/** Outer edge of the existing sensor-optics keyhole in normalized shader space. */
 export const KEYHOLE_OUTER_RADIUS = 1.05;
 /** Clearance required before entering the visible state. */
 export const GLOBE_ENTER_CLEARANCE_PX = 24;

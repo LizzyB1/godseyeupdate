@@ -70,7 +70,7 @@ export function environmentalLabel(choice = ENVIRONMENTAL_LABEL_CHOICE) {
  *                         active. A mission has no opinion.
  *   NOT TOUCHED           `_detectionUserOverridden`. Setting it would mean "the
  *                         operator hand-edited detection" and would silently
- *                         kill the CRT/NVG/FLIR auto-preset contract for the
+ *                         kill the CRT auto-preset contract for the
  *                         whole session. Missions run through setContextMode and
  *                         DataManager.setEnabled, neither of which writes it.
  *   NOT TOUCHED           detection allocation (`gev:detection-allocation:v1`),

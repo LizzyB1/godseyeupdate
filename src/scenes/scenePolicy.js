@@ -10,9 +10,9 @@
 //
 // A shot's layer map is an assertion about the layers it NAMES, not a claim of
 // authority over every layer that will ever exist. Recipes already spell out
-// the layers they want OFF (see 'thermal-threats', which declares
-// flights/satellites/traffic false), so honouring only the declared keys keeps
-// every authored intent intact while leaving undeclared layers alone.
+// the layers they want OFF (see 'orbital-watch', which declares
+// flights/earthquakes/traffic false), so honouring only the declared keys
+// keeps every authored intent intact while leaving undeclared layers alone.
 //
 // Operator-captured shots are unaffected: captureShot() snapshots the whole
 // registry (director._captureLayerStates), so those shots declare all sixteen

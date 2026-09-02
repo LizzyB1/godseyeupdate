@@ -9,7 +9,7 @@ import { decodeLayerStateParams, encodeLayerStateParams } from './data/layerStat
  * Share Links — URL Hash State Management
  *
  * Encodes camera position + style into the URL hash so links can be shared.
- * Format: #lat=37.77&lon=-122.42&alt=800&heading=0&pitch=-35&style=nvg&hud=tactical&hv=1&dm=BALANCED&dd=50&da=elastic&kf=16&ko=0&cr=0&map=photoreal
+ * Format: #lat=37.77&lon=-122.42&alt=800&heading=0&pitch=-35&style=crt&hud=tactical&hv=1&dm=BALANCED&dd=50&da=elastic&kf=16&ko=0&cr=0&map=photoreal
  */
 
 const DEBOUNCE_MS = 500;
@@ -18,11 +18,8 @@ const DEBOUNCE_MS = 500;
 const STYLE_TO_URL = {
   normal: 'normal',
   retro: 'crt',
-  surveillance: 'nvg',
-  thermal: 'flir',
   anime: 'anime',
   noir: 'noir',
-  snow: 'snow',
 };
 
 const SHARE_UI_STATE_PARAM = 'ui';
@@ -55,19 +52,6 @@ const SHARE_STYLE_PARAM_REGISTRY = Object.freeze({
     { key: 'distortion', token: 'd', min: 0, max: 1 },
     { key: 'instability', token: 'i', min: 0, max: 1 },
   ]),
-  surveillance: Object.freeze([
-    { key: 'gain', token: 'g', min: 0, max: 1 },
-    { key: 'bloom', token: 'b', min: 0, max: 1 },
-    { key: 'scanlineStr', token: 's', min: 0, max: 1 },
-    { key: 'pixelation', token: 'p', min: 1, max: 6 },
-  ]),
-  thermal: Object.freeze([
-    { key: 'sensitivity', token: 's', min: 0, max: 1 },
-    { key: 'bloom', token: 'b', min: 0, max: 1 },
-    { key: 'mode', token: 'm', min: 0, max: 1 },
-    { key: 'pixelation', token: 'p', min: 1, max: 6 },
-    { key: 'palette', token: 'a', min: 0, max: 1 },
-  ]),
   anime: Object.freeze([
     { key: 'saturation', token: 's', min: 0, max: 2 },
     { key: 'edgeThick', token: 'e', min: 0, max: 1 },
@@ -76,10 +60,6 @@ const SHARE_STYLE_PARAM_REGISTRY = Object.freeze({
     { key: 'contrastAmt', token: 'c', min: 0, max: 2 },
     { key: 'grainAmt', token: 'g', min: 0, max: 1 },
     { key: 'vignetteAmt', token: 'v', min: 0, max: 1 },
-  ]),
-  snow: Object.freeze([
-    { key: 'density', token: 'd', min: 0, max: 1 },
-    { key: 'wind', token: 'w', min: 0, max: 1 },
   ]),
 });
 

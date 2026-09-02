@@ -168,8 +168,8 @@ function isEditableTarget(el) {
  * Keys with a PRE-EXISTING single-press global shortcut elsewhere that this
  * module's letters/digits collide with: plain 'f' toggles the data panel,
  * plain 'd' cycles detection mode, plain '1'/'3' switch the sensor style to
- * Normal/Surveillance (StyleManager's `_globalKeydownHandler` in ui.js —
- * its `keyMap` covers '1'-'7', bubble-phase `keydown` on `document`). Those
+ * Normal/Anime (StyleManager's `_globalKeydownHandler` in ui.js —
+ * its `keyMap` covers '1'-'4', bubble-phase `keydown` on `document`). Those
  * four are suppressed with `stopPropagation()` while claimed as camera keys
  * so holding them doesn't also flicker the legacy toggle or swap styles.
  * ('c' used to need the same treatment for the removed yaw-in-place

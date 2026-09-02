@@ -61,8 +61,8 @@ export const SATELLITE_CLASSES = Object.freeze({
     label: 'COMMS',
     // Dim slate — thousands of these appear in DENSE mode. They must read as
     // texture behind the core catalog, never compete with it. Rec.601 luma
-    // ~0.40 against VISUAL's ~0.69 keeps the two separable even when the
-    // NVG/FLIR shaders collapse the scene to a single channel.
+    // ~0.40 against VISUAL's ~0.69 keeps the two separable even when a
+    // mono shader (noir) collapses the scene to a single channel.
     color: '#54697f',
     blurb: 'Broadband constellation shell — shown only in DENSE mode',
   }),

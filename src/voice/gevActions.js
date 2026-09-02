@@ -21,7 +21,7 @@ import { resolveRegionRingForQuery } from '../annotations/annotationResolver.js'
 import { normalizeRadioCountryInput } from '../data/radioCountry.js';
 import { TR3B_CLASS } from '../data/tr3bRegistry.js';
 
-const ALLOWED_STYLES = new Set(['normal', 'retro', 'surveillance', 'thermal', 'anime', 'noir', 'snow']);
+const ALLOWED_STYLES = new Set(['normal', 'retro', 'anime', 'noir']);
 const PANEL_ALIASES = new Map([
   ['data', 'data-panel'],
   ['data layers', 'data-panel'],
@@ -2183,8 +2183,6 @@ function focusDataLayerRow(layerId) {
 function normalizeStyle(value) {
   const raw = String(value || '').trim().toLowerCase();
   if (raw === 'filter off' || raw === 'off' || raw === 'default') return 'normal';
-  if (raw === 'night vision' || raw === 'nvg') return 'surveillance';
-  if (raw === 'flir') return 'thermal';
   if (ALLOWED_STYLES.has(raw)) return raw;
   return null;
 }

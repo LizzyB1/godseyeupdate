@@ -124,7 +124,7 @@ test('an explicit OUTSIDE opacity still wins over the new default', () => {
 // ---------------------------------------------------------------------------
 
 test('first run opens with detection on, in every style, using the one tactical preset', () => {
-  // Normal used to start OFF while only CRT/NVG/FLIR auto-applied the preset.
+  // Normal used to start OFF while only the military styles auto-applied the preset.
   // It is now the baseline for all of them, reusing the SAME frozen object, so
   // "the tactical look" cannot fork into two definitions.
   assert.match(uiSource, /const MILITARY_DETECTION_PRESET = Object\.freeze\(\{ mode: 'dense', densityPct: 75 \}\);/,
@@ -170,7 +170,7 @@ test('detection-on-by-default is a default, not an operator override', () => {
   // Style-switch semantics are unchanged: Normal is still not a preset owner,
   // so switching TO Normal does not re-apply or clear anything.
   const stylePresets = uiBlock('const STYLE_PRESET_DEFAULTS = {', '\n};');
-  for (const style of ['retro', 'surveillance', 'thermal']) {
+  for (const style of ['retro']) {
     assert.match(stylePresets, new RegExp(`\\n  ${style}: \\{`),
       `${style} still carries its own preset`);
   }

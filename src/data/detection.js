@@ -58,7 +58,7 @@ import { detectionBracketOpacity } from './detectionPresentation.js';
  *   - BALANCED — stable mixed-layer label cohort at 50
  *   - DENSE    — broad stable mixed-layer label cohort at 75/100
  *
- * Theming is driven by THEME_MAP presets (retro, surveillance, thermal, default).
+ * Theming is driven by THEME_MAP presets (retro, default).
  * Density tuning and suspension allow external callers (scene transitions, UI)
  * to throttle or pause rendering without tearing down the overlay.
  */
@@ -122,7 +122,7 @@ const BILL_FAR_SCALE = 0.5;
  * `traffic.js` — the app's existing convention for a developer-only affordance.
  *
  * The banner ("DENSE VIS:15 SRC:1036 DENS:100% ELASTIC 0.4ms") is engine
- * telemetry, but it painted for every user: CRT/NVG/FLIR auto-enable detection,
+ * telemetry, but it painted for every user: CRT auto-enables detection,
  * so an orange debug readout was the first thing a visitor saw, colliding with
  * the cockpit callsign block. It is kept — the same numbers also ship
  * programmatically via `getDetectionDiagnostics()` — but now defaults OFF and
@@ -549,7 +549,7 @@ function _publishDiagnostics() {
 
 /**
  * Switches the visual theme for detection's host paint lane.
- * @param {string} styleName - Theme key from THEME_MAP (e.g. 'retro', 'surveillance', 'thermal').
+ * @param {string} styleName - Theme key from THEME_MAP (e.g. 'retro').
  *   Falls back to '_default' for unrecognized names.
  */
 export function setDetectionStyle(styleName) {

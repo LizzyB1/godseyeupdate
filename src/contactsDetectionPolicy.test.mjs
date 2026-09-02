@@ -123,7 +123,7 @@ test('the Contacts preset is the very object the military styles apply', () => {
   assert.equal(MILITARY_PRESET.mode, 'DENSE');
   assert.equal(MILITARY_PRESET.densityPct, 75);
   const styles = uiSource.match(/detection: MILITARY_DETECTION_PRESET,/g) || [];
-  assert.equal(styles.length, 3, 'retro, surveillance and thermal all share the one preset object');
+  assert.equal(styles.length, 1, 'retro (the sole remaining military style) applies the one preset object');
   assert.doesNotMatch(
     uiSource,
     /detection: \{ mode: 'dense'/,
@@ -225,7 +225,7 @@ test('a style chosen DURING the session keeps its auto-enable instead of the sna
   // out the style rule — younger than the snapshot — wins.
   startAt('OFF');
   const { restore } = transition(true);
-  setDetectionModeByLabel('DENSE'); // _applyStylePresetDefaults('surveillance')
+  setDetectionModeByLabel('DENSE'); // _applyStylePresetDefaults('retro')
   const result = transition(false, { restore, styleOwnsDetection: true });
   assert.equal(getDetectionMode(), 'DENSE');
   assert.equal(result.changed, false, 'the style rule wins, so nothing is replayed');

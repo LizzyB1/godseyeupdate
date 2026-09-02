@@ -437,14 +437,12 @@ test('detection lifecycle re-hosts unchanged painters behind the sole host liste
     assert.equal(surface.style.opacity, '1');
     assert.ok(bannerCount() > beforeSuspend);
 
-    // These are the exact engine calls made by military style presets after
-    // their production UI gate chooses CRT/NVG/FLIR defaults.
+    // These are the exact engine calls made by the military style preset
+    // after its production UI gate chooses the CRT default.
     const expectedThemes = {
       retro: 'contrast(1.08) saturate(1.04) drop-shadow(0 0 3px rgba(255, 176, 56, 0.45))',
-      surveillance: 'contrast(1.12) saturate(1.12) drop-shadow(0 0 3px rgba(120, 255, 120, 0.42))',
-      thermal: 'contrast(1.1) saturate(1.08) drop-shadow(0 0 3px rgba(255, 224, 170, 0.42))',
     };
-    for (const style of ['retro', 'surveillance', 'thermal']) {
+    for (const style of ['retro']) {
       setMode('OFF');
       setDetectionStyle(style);
       assert.equal(surface.style.mixBlendMode, 'screen');
@@ -541,7 +539,7 @@ test('every style paints its OWN plate token through the production callout path
     settleFrame(env);
     settleFrame(env);
 
-    for (const style of ['surveillance', 'retro', 'thermal', 'normal']) {
+    for (const style of ['retro', 'normal']) {
       setDetectionStyle(style);
       settleFrame(env);
       env.ctx.calls.length = 0;
@@ -575,13 +573,13 @@ test('space-tier callouts take the heavier plate while air contacts keep the lig
   try {
     initWorldOverlay(env.viewer);
     initDetection(env.viewer, [mixedTierLayer()], () => {});
-    setDetectionStyle('surveillance');
+    setDetectionStyle('retro');
     setMode('DENSE');
     settleFrame(env);
     env.ctx.calls.length = 0;
     settleFrame(env);
 
-    const theme = DETECTION_THEME_MAP.surveillance;
+    const theme = DETECTION_THEME_MAP.retro;
     assert.notEqual(
       theme.calloutPlate,
       theme.calloutPlateSpace,
@@ -598,19 +596,19 @@ test('space-tier callouts take the heavier plate while air contacts keep the lig
   }
 });
 
-test('surveillance military tier reaches the dedicated render target as shipped red', () => {
+test('retro military tier reaches the dedicated render target as shipped orange', () => {
   const env = installEnvironment();
   try {
     initWorldOverlay(env.viewer);
     initDetection(env.viewer, [militaryLayer()], () => {});
-    setDetectionStyle('surveillance');
+    setDetectionStyle('retro');
     setMode('DENSE');
     env.advance(250);
     env.postRender.raise();
 
     assert.ok(
-      env.detectionCtx.calls.some(([name, value]) => name === 'strokeStyle' && value === '#ff5a47'),
-      'the production projection/tier/batched-bracket paint path emits surveillance military red',
+      env.detectionCtx.calls.some(([name, value]) => name === 'strokeStyle' && value === '#ff8a3c'),
+      'the production projection/tier/batched-bracket paint path emits retro military orange',
     );
     assert.ok(env.detectionCtx.calls.some(([name, path]) => name === 'stroke'
       && path instanceof MockPath2D));
@@ -688,10 +686,9 @@ test('detection cannot resurrect a private canvas, listener, matrix, resize, cle
   assert.match(source, /registerWorldOverlayPaintLane\('detection', _paintDetectionLane/);
   assert.match(source, /target: 'detection'/);
   assert.match(source, /shouldPaint: _shouldPaintDetectionLane/);
-  // The three military styles used to carry three copies of these numbers.
-  // They now share ONE frozen object, which Cockpit's force-on reuses too, so
-  // the pin moved from "three identical literals" to "one preset, referenced
-  // three times" — same guarantee, and the copies can no longer drift.
+  // The three military styles used to carry three copies of these numbers
+  // (CRT, and the since-retired NVG and FLIR). They shared ONE frozen object,
+  // which Cockpit's force-on reuses too — now referenced once, by CRT alone.
   assert.match(
     uiSource,
     /const MILITARY_DETECTION_PRESET = Object\.freeze\(\{ mode: 'dense', densityPct: 75 \}\);/,
@@ -699,17 +696,17 @@ test('detection cannot resurrect a private canvas, listener, matrix, resize, cle
   );
   assert.equal(
     uiSource.match(/detection: MILITARY_DETECTION_PRESET,/g)?.length,
-    3,
-    'CRT, NVG, and FLIR retain their Dense auto-enable defaults',
+    1,
+    'CRT retains its Dense auto-enable default',
   );
   assert.match(uiSource, /preset\.detection && !this\._detectionUserOverridden/);
 });
 
 // ── Developer telemetry gate (2026-08-20 QA hunt) ───────────────────────────
 // The orange mode banner ("DENSE  VIS:15  SRC:1036  DENS:100%  ELASTIC  0.4ms")
-// painted for every user: CRT/NVG/FLIR auto-enable detection, so engine
-// telemetry was the first thing a visitor saw, overlapping the cockpit callsign
-// block. It is kept as a debug affordance, but must default OFF.
+// painted for every user: CRT auto-enables detection, so engine telemetry was
+// the first thing a visitor saw, overlapping the cockpit callsign block. It
+// is kept as a debug affordance, but must default OFF.
 test('detectionDebugRequested parses the query-string gate and nothing else', () => {
   assert.equal(detectionDebugRequested('?detectDebug=1'), true);
   assert.equal(detectionDebugRequested('?foo=bar&detectDebug=1'), true);

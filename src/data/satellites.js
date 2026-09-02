@@ -1864,7 +1864,7 @@ const satellitesLayer = {
           type: 'SAT',
           // Human class ("NAV · GPS"), not the raw CelesTrak tag ("GPS-OPS").
           // The detection canvas composites ABOVE the post-FX chain, so this
-          // is how class survives NVG/FLIR once the dot colors are collapsed.
+          // is how class survives a mono shader once the dot colors are collapsed.
           klass: satelliteClassLabel(cat?.group, { isIss: noradId === ISS_NORAD }),
         };
         _detectionObjects.set(noradId, object);
