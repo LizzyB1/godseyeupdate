@@ -9394,7 +9394,7 @@ body.scene-playback-mode #first-run-launcher {
   box-shadow: 0 0 16px var(--accent-glow);
 }
 
-/* ── Simple two-button rows: lateral, orbit, pitch ───────────────────── */
+/* ── Simple two-button rows: orbit, yaw, pitch ───────────────────────── */
 .camctl-row {
   display: flex;
   gap: 8px;
@@ -9404,6 +9404,25 @@ body.scene-playback-mode #first-run-launcher {
   height: 26px;
   font: 700 13px/1 var(--font-mono);
 }
+
+/* ── Lateral (WASD) 4-way plus-shaped move pad ───────────────────────── */
+.camctl-dpad {
+  display: grid;
+  grid-template-columns: 30px 30px 30px;
+  grid-template-rows: 26px 26px 26px;
+  grid-template-areas:
+    ".    up    ."
+    "left .     right"
+    ".    down  .";
+  gap: 6px;
+}
+.camctl-dpad-btn {
+  font: 700 13px/1 var(--font-mono);
+}
+.camctl-dpad-up { grid-area: up; }
+.camctl-dpad-down { grid-area: down; }
+.camctl-dpad-left { grid-area: left; }
+.camctl-dpad-right { grid-area: right; }
 
 .camctl-aux {
   display: flex;

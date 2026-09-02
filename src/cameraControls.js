@@ -4,12 +4,25 @@ import * as Cesium from 'cesium';
  * Keyboard + mouse + on-screen camera controls, housed in one movable,
  * resizable control box (bottom-left by default).
  *
- * Arrow keys (and WASD as an alias) translate the camera — Up/W and Down/S
- * move it LATERALLY (side to side, perpendicular to where it's looking),
- * Left/A and Right/D ORBIT it instead of turning it: the camera swings
- * around a ground focal point — wherever it was looking when the orbit key
- * was first pressed — rather than spinning in place around its own eye
- * position. Concretely, an orbit key press: (1) casts a ray from the
+ * WASD (and the arrow keys as a partial alias, see below) translate the
+ * camera LATERALLY across the ground: W/Up moves forward, S/Down moves
+ * backward, A moves left, D moves right — all four stay in the horizontal
+ * plane at constant height/pitch, a pure slide across the surface rather
+ * than a dive toward or climb away from it. Left/right strafing (A/D)
+ * reuses `camera.moveLeft`/`moveRight`, which already stay horizontal
+ * regardless of pitch (they move along the camera's `right` vector, the
+ * axis pitch itself rotates around). Forward/backward (W/S) has no
+ * built-in Cesium equivalent — pitch-independent forward motion — so it's
+ * computed manually each frame from the camera's heading: a horizontal
+ * unit vector in the local east-north-up frame at the camera's position
+ * (`Cesium.Transforms.eastNorthUpToFixedFrame`), added directly to
+ * `camera.position`, scaled by the same altitude-proportional speed used
+ * throughout.
+ *
+ * 1 and 3 (and Left/Right arrow as a legacy alias) ORBIT the camera
+ * around a ground focal point — wherever it was looking when the orbit
+ * key was first pressed — rather than spinning in place around its own
+ * eye position. Concretely, an orbit key press: (1) casts a ray from the
  * camera along its current view direction to find where it meets the
  * ellipsoid (falling back to the point straight below the camera if the
  * view is tilted above the horizon, e.g. toward the sky) and holds that
@@ -18,11 +31,15 @@ import * as Cesium from 'cesium';
  * distance-to-point constant (`camera.lookAt` with a `HeadingPitchRange`,
  * transform reset to identity immediately after so every other camera
  * method keeps working in world space). The same patch of ground stays
- * framed while the vantage point swings around it — a proper orbit,
- * distinct from `camera.lookLeft/lookRight`, which would just re-aim the
- * camera from a fixed position and let that ground point slide out of
- * view. Releasing and re-pressing an orbit key re-picks the focal point
- * from wherever the camera ends up looking next.
+ * framed while the vantage point swings around it. Releasing and
+ * re-pressing an orbit key re-picks the focal point from wherever the
+ * camera ends up looking next.
+ *
+ * Z and C ROTATE THE CAMERA IN PLACE — a simple yaw turn (`camera.lookLeft`
+ * /`lookRight`) from a fixed position, distinct from both the 1/3 orbit
+ * above (which moves the camera's position around a held ground point)
+ * and the Q/E roll below (which twists about the view axis instead of
+ * turning left/right).
  *
  * Move speed (lateral translation) scales with current altitude (a
  * fraction of camera height per second, floored so it still moves at
@@ -30,11 +47,9 @@ import * as Cesium from 'cesium';
  * forward/backward dolly.
  *
  * Pitch — tilting the view up/down — has its own dedicated pair:
- * PageUp/PageDown, aliased to 1/3 for continuity with the old arrow-key
- * pitch binding. Q/E roll the camera (rotate about the view axis — a
- * different motion from the A/D orbit above); R/F zoom, which already
- * doubles as forward/backward dolly since lateral movement no longer
- * covers that axis.
+ * PageUp/PageDown. Q/E roll the camera (rotate about the view axis); R/F
+ * zoom, which already doubles as forward/backward dolly since lateral
+ * (WASD) movement covers ground-plane translation instead.
  *
  * A live orientation readout lives at the top of the control box: a compass
  * needle that swings to the camera's current heading, with a small
@@ -45,32 +60,34 @@ import * as Cesium from 'cesium';
  * orbit/pan.
  *
  * Mouse: holding the left+right buttons together and dragging vertically
- * pitches (same axis as PageUp/PageDown/1/3); holding the right button
- * alone and dragging horizontally rolls (same axis as Q/E). This claims
- * the right mouse button, so Cesium's native right-drag zoom is disabled
- * in favor of it (scroll-wheel zoom, and the R/F keys, still work).
+ * pitches (same axis as PageUp/PageDown); holding the right button alone
+ * and dragging horizontally rolls (same axis as Q/E). This claims the
+ * right mouse button, so Cesium's native right-drag zoom is disabled in
+ * favor of it (scroll-wheel zoom, and the R/F keys, still work).
  *
  * Opposite-direction cancellation: holding both keys of an axis (lateral
- * left+right, orbit left+right, or pitch up+down) at once cancels that
- * axis to a stop, exactly like holding neither — there is no extra "which
- * one wins" bookkeeping. The moment one of the two is released, the axis
- * falls through to whichever single key is still held, so movement resumes
- * in that key's direction immediately. For orbit specifically, this also
- * means the held focal point survives a brief overlap (both keys down for
- * one frame) and is only released once BOTH orbit keys are up.
+ * forward+backward, lateral left+right, orbit left+right, yaw left+right,
+ * or pitch up+down) at once cancels that axis to a stop, exactly like
+ * holding neither — there is no extra "which one wins" bookkeeping. The
+ * moment one of the two is released, the axis falls through to whichever
+ * single key is still held, so movement resumes in that key's direction
+ * immediately. For orbit specifically, this also means the held focal
+ * point survives a brief overlap (both keys down for one frame) and is
+ * only released once BOTH orbit keys are up.
  *
- * The whole control box — grip header, orientation readout, lateral pair,
- * orbit pair, pitch pair, roll/zoom pair, legend, resize handle — is one
- * DOM subtree, so it can be dragged (grip the header) and resized (drag
- * the bottom-right corner) as a unit. Position and size persist to
+ * The whole control box — grip header, orientation readout, lateral pad,
+ * orbit pair, yaw pair, pitch pair, roll/zoom pair, legend, resize handle —
+ * is one DOM subtree, so it can be dragged (grip the header) and resized
+ * (drag the bottom-right corner) as a unit. Position and size persist to
  * localStorage under the `godsEyeView.camCtlBox.` prefix; double-clicking
  * the header resets both to their defaults.
  */
 
-const MOVE_RATE_PER_S = 0.6; // fraction of current camera height, per second — W/S/A/D lateral speed
+const MOVE_RATE_PER_S = 0.6; // fraction of current camera height, per second — WASD lateral speed
 const MIN_MOVE_STEP_M = 0.5; // floor so lateral movement still moves at very low altitude
-const ORBIT_RATE_RAD_S = Cesium.Math.toRadians(50); // A/D orbit-around-focal-point speed
-const PITCH_RATE_RAD_S = Cesium.Math.toRadians(65); // PageUp/PageDown/1-3 pitch speed
+const ORBIT_RATE_RAD_S = Cesium.Math.toRadians(50); // 1/3 orbit-around-focal-point speed
+const YAW_RATE_RAD_S = Cesium.Math.toRadians(50); // Z/C rotate-camera-in-place speed
+const PITCH_RATE_RAD_S = Cesium.Math.toRadians(65); // PageUp/PageDown pitch speed
 const TWIST_RATE_RAD_S = Cesium.Math.toRadians(50); // Q/E roll speed
 const ZOOM_RATE_PER_S = 0.9; // fraction of current camera height, per second
 const MIN_ZOOM_STEP_M = 0.5; // floor so zoom still moves at very low altitude
@@ -83,42 +100,56 @@ const MAX_DRAG_STEP_PX = 60; // clamp a single mousemove delta (e.g. after point
 const STORAGE_PREFIX = 'godsEyeView.camCtlBox.';
 const EDGE_INSET = 6;
 const DEFAULT_WIDTH = 176;
-const DEFAULT_HEIGHT = 330;
+const DEFAULT_HEIGHT = 430;
 const MIN_WIDTH = 150;
 const MAX_WIDTH = 360;
-const MIN_HEIGHT = 220;
-const MAX_HEIGHT = 560;
+const MIN_HEIGHT = 320;
+const MAX_HEIGHT = 620;
 
-/** Keys mapped to a held "direction"/"action" name. Arrow keys are primary; WASD/PageUp-Down/1-3/QE/RF are aliases. Keyed by KeyboardEvent.code so layout doesn't matter. */
+/** Keys mapped to a held "direction"/"action" name. Arrow keys carry over
+ * the subset of the scheme they've always aliased (forward/back, orbit);
+ * WASD/1-3/Z-C/QE/RF are keyed by KeyboardEvent.code so layout doesn't matter. */
 const KEY_TO_ACTION = {
-  ArrowUp: 'lateralLeft', ArrowDown: 'lateralRight', ArrowLeft: 'orbitLeft', ArrowRight: 'orbitRight',
-  KeyW: 'lateralLeft', KeyS: 'lateralRight', KeyA: 'orbitLeft', KeyD: 'orbitRight',
+  ArrowUp: 'lateralForward', ArrowDown: 'lateralBackward', ArrowLeft: 'orbitLeft', ArrowRight: 'orbitRight',
+  KeyW: 'lateralForward', KeyS: 'lateralBackward', KeyA: 'lateralLeft', KeyD: 'lateralRight',
+  Digit1: 'orbitLeft', Digit3: 'orbitRight',
+  KeyZ: 'yawLeft', KeyC: 'yawRight',
   PageUp: 'pitchUp', PageDown: 'pitchDown',
-  Digit1: 'pitchUp', Digit3: 'pitchDown', // second pitch alias, held over from the old arrow-key binding
   KeyQ: 'rollLeft', KeyE: 'rollRight',
   KeyR: 'zoomIn', KeyF: 'zoomOut',
 };
 
-/** Lateral (side-to-side) translation pair — W/S / Up/Down. Perpendicular
- * to the view direction, at constant pitch/height — a pure sideways slide
- * across the surface, not a dive toward or climb away from it. */
+/** Lateral (ground-plane) translation pad — WASD. All four stay in the
+ * horizontal plane at constant pitch/height — a pure slide across the
+ * surface, not a dive toward or climb away from it. Forward/backward (W/S)
+ * follow the camera's heading; left/right (A/D) strafe perpendicular to it. */
 const LATERAL_BUTTONS = [
-  { actions: ['lateralLeft'], label: '←', title: 'Move laterally left (W / Up)' },
-  { actions: ['lateralRight'], label: '→', title: 'Move laterally right (S / Down)' },
+  { actions: ['lateralForward'], label: '▲', title: 'Move forward (W / Up)', area: 'up' },
+  { actions: ['lateralLeft'], label: '◀', title: 'Move left (A)', area: 'left' },
+  { actions: ['lateralRight'], label: '▶', title: 'Move right (D)', area: 'right' },
+  { actions: ['lateralBackward'], label: '▼', title: 'Move backward (S / Down)', area: 'down' },
 ];
 
-/** Orbit pair — A/D / Left/Right. Swings the camera around a ground focal
+/** Orbit pair — 1/3 / Left/Right. Swings the camera around a ground focal
  * point picked from wherever it's currently looking, instead of spinning
  * it in place — see the module doc comment above. */
 const ORBIT_BUTTONS = [
-  { actions: ['orbitLeft'], label: '↶', title: 'Orbit left around ground point (A / Left)' },
-  { actions: ['orbitRight'], label: '↷', title: 'Orbit right around ground point (D / Right)' },
+  { actions: ['orbitLeft'], label: '↶', title: 'Orbit left around ground point (1 / Left)' },
+  { actions: ['orbitRight'], label: '↷', title: 'Orbit right around ground point (3 / Right)' },
+];
+
+/** Yaw pair — Z/C. Rotates the camera in place from a fixed position,
+ * distinct from the 1/3 orbit above (which moves the camera around a held
+ * ground point) and the Q/E roll below (which twists about the view axis). */
+const YAW_BUTTONS = [
+  { actions: ['yawLeft'], label: '↺', title: 'Rotate camera left in place (Z)' },
+  { actions: ['yawRight'], label: '↻', title: 'Rotate camera right in place (C)' },
 ];
 
 /** Dedicated pitch pair. */
 const PITCH_BUTTONS = [
-  { actions: ['pitchUp'], label: '▲', title: 'Pitch up (PageUp / 1)' },
-  { actions: ['pitchDown'], label: '▼', title: 'Pitch down (PageDown / 3)' },
+  { actions: ['pitchUp'], label: '▲', title: 'Pitch up (PageUp)' },
+  { actions: ['pitchDown'], label: '▼', title: 'Pitch down (PageDown)' },
 ];
 
 const ROLL_ZOOM_BUTTONS = [
@@ -136,21 +167,24 @@ function isEditableTarget(el) {
 }
 
 /**
- * Keys with a PRE-EXISTING single-press global shortcut elsewhere (bubble-
- * phase `keydown` on `document`) that this module's letters/digits collide
- * with: plain 'f' toggles the data panel, plain 'd' cycles detection mode,
- * and plain '1'/'3' switch the sensor style to Normal/Surveillance (see
- * StyleManager's `_globalKeydownHandler` in ui.js — its `keyMap` covers
- * '1'-'7'). Those four are suppressed with `stopPropagation()` while
+ * Keys with a PRE-EXISTING single-press global shortcut elsewhere that this
+ * module's letters/digits collide with: plain 'f' toggles the data panel,
+ * plain 'd' cycles detection mode, plain '1'/'3' switch the sensor style to
+ * Normal/Surveillance (StyleManager's `_globalKeydownHandler` in ui.js —
+ * its `keyMap` covers '1'-'7', bubble-phase `keydown` on `document`), and
+ * plain 'c' both toggles CCTV overlays (same `_globalKeydownHandler`) and
+ * enters/exits cockpit view when an aircraft is tracked
+ * (`CockpitViewController#onKeyDown`, capture-phase `keydown` on
+ * `document`). Those five are suppressed with `stopPropagation()` while
  * claimed as camera keys so holding them doesn't also flicker the legacy
- * toggle or swap styles mid-pitch. Every other claimed key (arrows, W/A/S,
- * Q/E, R, PageUp/PageDown) is left to bubble normally — several existing
- * widgets (e.g. the Global Context tab row's roving arrow-key navigation,
- * the radio tuner slider) also read arrow keys while focused, and
- * suppressing propagation for those would break that existing keyboard
- * navigation.
+ * toggle, swap styles, or jump into cockpit view mid-orbit/yaw. Every other
+ * claimed key (arrows, W/A/S/D, Q/E, R, PageUp/PageDown) is left to bubble
+ * normally — several existing widgets (e.g. the Global Context tab row's
+ * roving arrow-key navigation, the radio tuner slider) also read arrow keys
+ * while focused, and suppressing propagation for those would break that
+ * existing keyboard navigation.
  */
-const LEGACY_SHORTCUT_CODES = new Set(['KeyF', 'KeyD', 'Digit1', 'Digit3']);
+const LEGACY_SHORTCUT_CODES = new Set(['KeyF', 'KeyD', 'Digit1', 'Digit3', 'KeyC']);
 
 /** Clamp a box's top-left so it stays fully on-screen at its current size. */
 function clampBoxToViewport(left, top, width, height) {
@@ -193,7 +227,7 @@ function buildControlBox({ onPress, onRelease }) {
   root.id = 'camctl-pad';
   root.className = 'camctl-pad';
   root.setAttribute('role', 'group');
-  root.setAttribute('aria-label', 'Camera lateral move, orbit, pitch, roll, zoom, and orientation controls');
+  root.setAttribute('aria-label', 'Camera lateral move, orbit, rotate, pitch, roll, zoom, and orientation controls');
 
   // ── Header: drag grip, title, and a compact live heading readout ──────
   const header = document.createElement('div');
@@ -326,26 +360,26 @@ function buildControlBox({ onPress, onRelease }) {
     btn.addEventListener('contextmenu', (event) => event.preventDefault());
   };
 
-  // Lateral (side-to-side translation) pair.
-  const lateralRow = document.createElement('div');
-  lateralRow.className = 'camctl-row';
-  lateralRow.title = 'Move sideways at constant height (W/Up = left, S/Down = right)';
-  for (const { actions, label, title: btnTitle } of LATERAL_BUTTONS) {
+  // Lateral (ground-plane translation) pad — WASD, plus-shaped 4-way.
+  const lateralPad = document.createElement('div');
+  lateralPad.className = 'camctl-dpad';
+  lateralPad.title = 'Move across the ground at constant height (W/Up forward, S/Down back, A left, D right)';
+  for (const { actions, label, title: btnTitle, area } of LATERAL_BUTTONS) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'camctl-btn camctl-row-btn';
+    btn.className = `camctl-btn camctl-dpad-btn camctl-dpad-${area}`;
     btn.title = btnTitle;
     btn.setAttribute('aria-label', btnTitle);
     btn.textContent = label;
     bind(btn, actions);
-    lateralRow.appendChild(btn);
+    lateralPad.appendChild(btn);
   }
-  body.appendChild(lateralRow);
+  body.appendChild(lateralPad);
 
   // Orbit pair — swings around a ground focal point instead of spinning in place.
   const orbitRow = document.createElement('div');
   orbitRow.className = 'camctl-row';
-  orbitRow.title = 'Orbit around the ground point currently in view (A/Left, D/Right)';
+  orbitRow.title = 'Orbit around the ground point currently in view (1/Left, 3/Right)';
   for (const { actions, label, title: btnTitle } of ORBIT_BUTTONS) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -357,6 +391,22 @@ function buildControlBox({ onPress, onRelease }) {
     orbitRow.appendChild(btn);
   }
   body.appendChild(orbitRow);
+
+  // Yaw pair — rotates the camera in place (fixed position), unlike orbit above.
+  const yawRow = document.createElement('div');
+  yawRow.className = 'camctl-row';
+  yawRow.title = 'Rotate the camera in place, position held fixed (Z/C)';
+  for (const { actions, label, title: btnTitle } of YAW_BUTTONS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'camctl-btn camctl-row-btn';
+    btn.title = btnTitle;
+    btn.setAttribute('aria-label', btnTitle);
+    btn.textContent = label;
+    bind(btn, actions);
+    yawRow.appendChild(btn);
+  }
+  body.appendChild(yawRow);
 
   // Dedicated pitch pair.
   const pitchRow = document.createElement('div');
@@ -390,8 +440,8 @@ function buildControlBox({ onPress, onRelease }) {
 
   const legend = document.createElement('div');
   legend.className = 'camctl-legend';
-  legend.title = 'W/S/Up/Down slide sideways · A/D/Left/Right orbit a ground point · PageUp/PageDown or 1/3 pitch · Q/E or right-drag roll · R/F zoom · mouse L+R drag pitch';
-  legend.textContent = 'W/S lateral · A/D orbit · PgUp/PgDn pitch · Q/E roll · R/F zoom';
+  legend.title = 'WASD/arrows slide across the ground · 1/3/Left/Right orbit a ground point · Z/C rotate in place · PageUp/PageDown pitch · Q/E or right-drag roll · R/F zoom · mouse L+R drag pitch';
+  legend.textContent = 'WASD lateral · 1/3 orbit · Z/C rotate · PgUp/PgDn pitch · Q/E roll · R/F zoom';
   body.appendChild(legend);
 
   // ── Resize handle (bottom-right corner) ────────────────────────────
@@ -790,6 +840,29 @@ export class CameraControls {
   }
 
   /**
+   * A horizontal (pitch-independent) unit vector, in world space, pointing
+   * in the direction the camera is currently facing (its heading) — used
+   * for W/S forward/backward translation, which (unlike A/D strafing) has
+   * no built-in Cesium equivalent since `moveForward`/`moveBackward` follow
+   * `camera.direction`, which tilts with pitch. Built from the local
+   * east-north-up frame at the camera's position: heading 0 (north) maps to
+   * local (east=0, north=1, up=0), heading 90° (east) to (1, 0, 0), matching
+   * Cesium's clockwise-from-north heading convention.
+   * @returns {?Cesium.Cartesian3} null only if the camera has no valid position yet.
+   */
+  _computeHorizontalForward() {
+    const camera = this.viewer.camera;
+    if (!camera?.positionWC) return null;
+    const ellipsoid = this.viewer.scene?.globe?.ellipsoid || Cesium.Ellipsoid.WGS84;
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(camera.positionWC, ellipsoid);
+    const local = new Cesium.Cartesian3(Math.sin(camera.heading), Math.cos(camera.heading), 0);
+    const world = Cesium.Matrix4.multiplyByPointAsVector(enu, local, new Cesium.Cartesian3());
+    const length = Cesium.Cartesian3.magnitude(world);
+    if (!(length > 0)) return null;
+    return Cesium.Cartesian3.divideByScalar(world, length, world);
+  }
+
+  /**
    * Where the camera is currently looking, projected onto the ground —
    * cast a ray along the view direction and intersect it with the
    * ellipsoid. Deliberately ellipsoid-only (not terrain/3D-tile picking,
@@ -881,16 +954,31 @@ export class CameraControls {
     // Opposite-direction cancellation on each axis independently: both held
     // (or neither) nets to 0 ("stop"); releasing one falls straight through
     // to the other's direction, with no separate "release" branch needed.
-    const lateralDir = (active.has('lateralRight') ? 1 : 0) - (active.has('lateralLeft') ? 1 : 0);
-    if (lateralDir !== 0) {
+    const strafeDir = (active.has('lateralRight') ? 1 : 0) - (active.has('lateralLeft') ? 1 : 0);
+    if (strafeDir !== 0) {
       const height = camera.positionCartographic?.height;
       const amount = Math.max(MIN_MOVE_STEP_M, (Number.isFinite(height) ? height : 1000) * MOVE_RATE_PER_S * dt);
       // Pure sideways translation — perpendicular to view direction, no
       // forward/backward component — so it slides across the surface at
       // constant height instead of diving toward or climbing away from it
       // the way `moveForward`/`moveBackward` would at any nonzero pitch.
-      if (lateralDir > 0) camera.moveRight(amount);
+      if (strafeDir > 0) camera.moveRight(amount);
       else camera.moveLeft(amount);
+    }
+
+    const forwardDir = (active.has('lateralForward') ? 1 : 0) - (active.has('lateralBackward') ? 1 : 0);
+    if (forwardDir !== 0) {
+      const height = camera.positionCartographic?.height;
+      const amount = Math.max(MIN_MOVE_STEP_M, (Number.isFinite(height) ? height : 1000) * MOVE_RATE_PER_S * dt);
+      // Pitch-independent forward/backward translation along the camera's
+      // heading — see `_computeHorizontalForward` — so it slides across the
+      // surface at constant height rather than following the tilted view
+      // direction the way `moveForward`/`moveBackward` would.
+      const forward = this._computeHorizontalForward();
+      if (forward) {
+        const delta = Cesium.Cartesian3.multiplyByScalar(forward, amount * forwardDir, new Cesium.Cartesian3());
+        Cesium.Cartesian3.add(camera.position, delta, camera.position);
+      }
     }
 
     const pitchDir = (active.has('pitchUp') ? 1 : 0) - (active.has('pitchDown') ? 1 : 0);
@@ -927,6 +1015,14 @@ export class CameraControls {
     } else {
       this._orbitFocus = null;
     }
+
+    // Rotate the camera in place (fixed position) — a plain yaw turn, unlike
+    // the orbit above which moves the camera's position around a held
+    // ground point. `lookLeft`/`lookRight` rotate about the camera's own up
+    // vector without touching `camera.position`.
+    const yawDir = (active.has('yawRight') ? 1 : 0) - (active.has('yawLeft') ? 1 : 0);
+    if (yawDir > 0) camera.lookRight(YAW_RATE_RAD_S * dt);
+    else if (yawDir < 0) camera.lookLeft(YAW_RATE_RAD_S * dt);
 
     const rollDir = (active.has('rollRight') ? 1 : 0) - (active.has('rollLeft') ? 1 : 0);
     if (rollDir > 0) camera.twistRight(TWIST_RATE_RAD_S * dt);
