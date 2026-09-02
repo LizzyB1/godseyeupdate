@@ -30,11 +30,18 @@
  * during its own startup, before this module ever runs. Docking a panel
  * always returns it to wherever it actually lived, not to its markup home.
  *
- * Deliberately NOT wired up: `#global-context-panel` (its context tabs /
- * mission roster / embedded radio panel lean on `#right-context-rail`
- * descendant-scoped CSS too deep to safely reproduce sight-unseen) and the
- * command-dock hover trays `#control-panel` / `#location-bar` (native
- * `<button>` headers with their own hover/pin choreography).
+ * `#global-context-panel` also lives in `#right-context-rail` and leans on
+ * descendant-scoped CSS the same way `#pp-toggles`/`#cctv-panel` do — its
+ * width already comes from its own `--panel-expanded-width` rule (not a
+ * rail-scoped one, so undocking doesn't need a pp-toggles-style width
+ * fallback), and style.css carries an equivalent `.gev-panel-undocked`
+ * scroll/collapsed-height rule for `.global-context-panel-inner` — see the
+ * "Movable HUD panels" section there.
+ *
+ * Deliberately NOT wired up: the command-dock hover trays `#control-panel`
+ * / `#location-bar` (native `<button>` headers with their own hover/pin
+ * choreography — full drag would fight that interaction model). Both still
+ * get full-hide (panelVisibility.js) and their existing collapse-to-strip.
  *
  * @module panelDrag
  */
@@ -348,6 +355,10 @@ export function initPanelDragging() {
     {
       id: 'scene-panel', panel: '#scene-panel', header: '#scene-panel .panel-header',
       resize: { varName: '--panel-expanded-width', min: 240, max: 640 },
+    },
+    {
+      id: 'global-context-panel', panel: '#global-context-panel', header: '#global-context-panel .panel-header',
+      resize: { varName: '--panel-expanded-width', min: 260, max: 520 },
     },
   ];
   for (const spec of specs) manager.register(spec.id, spec.panel, spec.header, spec.resize);

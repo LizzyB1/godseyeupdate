@@ -37,6 +37,7 @@ import { initPanelDragging } from './panelDrag.js';
 import { initMapOverlays } from './data/mapOverlays.js';
 import { initMapOverlayControls } from './mapOverlayControls.js';
 import { initCoordinatesBox } from './coordinatesBox.js';
+import { initPanelRestoreTray } from './panelRestoreTray.js';
 import { resolveApiKey } from './apiKeys.js';
 import { initSettingsDialog, OPACITY_STORAGE_KEY } from './settingsDialog.js';
 import { fetchSessionSettings, createSessionSettingsAutosave } from './sessionSettingsClient.js';
@@ -354,10 +355,17 @@ async function init() {
     const mapOverlayControls = initMapOverlayControls(mapOverlays);
     const coordinatesBox = initCoordinatesBox(mapOverlays);
 
-    // GUI overhaul: lets the DISPLAY, DATA LAYERS, CCTV, and SCENES panels be
-    // dragged free of their managed stacks — see src/panelDrag.js for why
-    // global-context-panel and the command-dock trays are intentionally left
-    // out (they lean on rail-scoped CSS this can't safely reproduce).
+    // Restore tray for any of the 6 major panels' new "×" hide button — see
+    // src/panelVisibility.js (the registry) and src/panelRestoreTray.js
+    // (this box).
+    const panelRestoreTray = initPanelRestoreTray();
+
+    // GUI overhaul: lets the DISPLAY, DATA LAYERS, CCTV, SCENES, and CONTEXT
+    // panels be dragged free of their managed stacks — see src/panelDrag.js
+    // for why the command-dock hover trays (Visual Presets/Location) are
+    // intentionally left out of free-dragging specifically (their native
+    // <button> headers have their own hover/pin choreography); they still
+    // get full-hide (src/panelVisibility.js) and collapse like every panel.
     const panelDrag = initPanelDragging();
 
     // The follow camera recomputes the tracked target's dead-reckon position
@@ -450,6 +458,7 @@ async function init() {
       mapOverlays,
       mapOverlayControls,
       coordinatesBox,
+      panelRestoreTray,
       panelDrag,
       getRenderGovernorDiagnostics,
       requestRender: governorRequestRender,

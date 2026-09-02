@@ -14,6 +14,7 @@ import {
 } from './cockpitTracking.js';
 import { IntelHUD } from './hud.js';
 import { initHudReadoutsBox } from './hudReadoutsBox.js';
+import { applyStoredHiddenState, hidePanel } from './panelVisibility.js';
 import { ShareLinkManager } from './sharelink.js';
 import {
   isExplicitLayerStateOrigin,
@@ -3596,7 +3597,8 @@ export class StyleManager {
 
   /**
    * Initializes panel collapse buttons and restores persisted collapsed state.
-   * Also sets up hover-expand behavior for the style presets and location bar panels.
+   * Also sets up hover-expand behavior for the style presets and location bar
+   * panels, and each panel's full-hide ("×") button — see panelVisibility.js.
    * @returns {void}
    */
   _initPanelChrome() {
@@ -3626,6 +3628,17 @@ export class StyleManager {
     this._initCommandDockPins();
     this._initCommandDockTrayMetrics();
     this._maybeNotifyLayoutReset();
+
+    document.querySelectorAll('.panel-close-btn[data-close-target]').forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const targetId = btn.dataset.closeTarget;
+        if (targetId) hidePanel(targetId);
+      });
+    });
+    // Re-apply whatever was hidden in a prior session, now that all 6
+    // panel elements above exist in the DOM.
+    applyStoredHiddenState();
   }
 
   /**

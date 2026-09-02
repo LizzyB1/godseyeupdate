@@ -2,6 +2,14 @@ import { API_KEY_DEFS, getApiKeyOverride, setApiKeyOverride } from './apiKeys.js
 import { FIRST_RUN_MISSIONS, environmentalLabel, runFirstRunChoice } from './firstRunExperience.js';
 import { SERVER_API_KEY_DEFS } from './data/sessionSettings.js';
 import { saveSessionSettings } from './sessionSettingsClient.js';
+import { showAllPanels } from './panelVisibility.js';
+
+/** Panels reset to their as-shipped collapsed state by "Reset panel layout" — every id
+ * that participates in the generic `.panel-collapse-btn[data-collapse-target]` mechanism. */
+const RESETTABLE_COLLAPSE_PANEL_IDS = [
+  'pp-toggles', 'param-slider-panel', 'location-bar', 'data-panel',
+  'cctv-panel', 'scene-panel', 'global-context-panel', 'radio-panel',
+];
 
 /**
  * @file Settings dialog: gear icon (top-left) opening a small panel with —
@@ -208,9 +216,9 @@ export class SettingsDialog {
 
       <section class="gev-settings-section">
         <h3 class="gev-settings-section-title">Panel layout</h3>
-        <p class="gev-settings-section-help">Data Layers / CCTV / Scenes / Display can be dragged free by their grip handle (⠿) and resized from their right edge.</p>
+        <p class="gev-settings-section-help">Data Layers / CCTV / Scenes / Display / Context can be dragged free by their grip handle (⠿) and resized from their right edge. Every panel can also be collapsed to a strip or fully hidden with its own "×" — hidden panels list in the "Hidden panels" tray for one-click restore.</p>
         <div class="gev-settings-actions">
-          <button type="button" id="gev-settings-reset-layout" class="gev-settings-btn">Reset panel positions</button>
+          <button type="button" id="gev-settings-reset-layout" class="gev-settings-btn">Reset all panels</button>
         </div>
       </section>
     `;
@@ -270,8 +278,19 @@ export class SettingsDialog {
     });
 
     dialog.querySelector('#gev-settings-reset-layout').addEventListener('click', () => {
+      // Position/width (the panels panelDrag.js manages), collapsed state
+      // (every panel that participates in the generic collapse mechanism),
+      // and fully-hidden state (panelVisibility.js) are three independent
+      // pieces of per-panel state — a full reset clears all three together.
       window.__godsEyeView?.panelDrag?.resetAll?.();
-      this._flashStatus(dialog, 'Panel positions reset.');
+      const setCollapsed = window.__godsEyeView?.styleManager?.setPanelCollapsed?.bind(
+        window.__godsEyeView.styleManager,
+      );
+      if (setCollapsed) {
+        for (const id of RESETTABLE_COLLAPSE_PANEL_IDS) setCollapsed(id, true);
+      }
+      showAllPanels();
+      this._flashStatus(dialog, 'Panel layout, collapsed state, and hidden panels reset.');
     });
   }
 
