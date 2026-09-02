@@ -579,8 +579,19 @@ test('markup, startup ordering and accessibility remain pinned', () => {
 
   const startup = main.slice(main.indexOf('void Promise.all(['), main.indexOf('// Expose for debugging'));
   assert.match(startup, /styleManager\.initialRestorePromise/);
-  assert.ok(startup.indexOf("loadingScreen.classList.add('hidden')") < startup.indexOf('initFirstRunExperience'));
-  assert.match(startup, /initFirstRunExperience\(\{ styleManager, dataManager \}\)/);
+  assert.match(startup, /loadingScreen\.classList\.add\('hidden'\)/);
+  // Product change: the launcher no longer auto-pops on load. main.js must
+  // not call initFirstRunExperience at all — it now lives as an on-demand
+  // Mission section inside src/settingsDialog.js, which reuses this
+  // module's FIRST_RUN_MISSIONS table and runFirstRunChoice runner directly.
+  // main.js's only remaining job is handing that section a live
+  // styleManager/dataManager once they exist.
+  assert.doesNotMatch(
+    main,
+    /initFirstRunExperience\(/,
+    'the launcher must no longer auto-run from main.js — see settingsDialog.js\'s Mission section',
+  );
+  assert.match(startup, /settingsDialog\?\.attachMissionRunner\?\.\(\{ styleManager, dataManager \}\)/);
 
   assert.match(css, /body\.ui-clean-view #first-run-launcher/);
   assert.match(css, /body\.recording-mode #first-run-launcher/);

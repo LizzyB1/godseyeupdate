@@ -1,6 +1,7 @@
 node_modules
 dist
 .env
+gev.settings.json
 *.log
 screenshots/
 qa-shots/

@@ -2,7 +2,7 @@
 //
 // The product issue was two clicks (open panel → open dropdown) to change
 // basemap. These tests pin the three things that make the row a faithful swap:
-// it projects the accepted four-source allowlist from the controller's
+// it projects the accepted five-source allowlist from the controller's
 // stack data, a click dispatches the same selection the `change` handler used
 // to, and the lit chip tracks controller state rather than the click. Run with:
 // npm test
@@ -67,32 +67,33 @@ const CONTROLLER_STACKS = [
   { id: 'bing-aerial', label: 'Bing Aerial', requiresIon: true, available: true, unavailableReason: null },
   { id: 'bing-labels', label: 'Bing Labels', requiresIon: true, available: true, unavailableReason: null },
   { id: 'osm', label: 'OSM', requiresIon: false, available: true, unavailableReason: null },
+  { id: 'hybrid', label: '3D + Terrain', requiresIon: false, available: true, unavailableReason: null },
 ];
 
-test('the row renders exactly the four accepted sources', () => {
+test('the row renders exactly the five accepted sources', () => {
   const container = makeElement();
   renderMapStackChips(container, CONTROLLER_STACKS, { activeId: 'photoreal', doc });
 
   assert.deepEqual(container.children.map((chip) => chip.dataset.stackId), [
-    'photoreal', 'bing-aerial', 'bing-labels', 'osm',
+    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'hybrid',
   ]);
   assert.deepEqual(container.children.map(chipText), [
-    'Google 3D', 'Bing Aerial', 'Bing Labels', 'OSM',
+    'Google 3D', 'Bing Aerial', 'Bing Labels', 'OSM', '3D + Terrain',
   ]);
-  assert.deepEqual(PRESENTED_MAP_STACK_IDS, ['photoreal', 'bing-aerial', 'bing-labels', 'osm']);
+  assert.deepEqual(PRESENTED_MAP_STACK_IDS, ['photoreal', 'bing-aerial', 'bing-labels', 'osm', 'hybrid']);
   assert.ok(container.children.every((chip) => chip.tagName === 'button' && chip.type === 'button'));
   assert.ok(container.children.every((chip) => chip.classList.contains(MAP_STACK_CHIP_CLASS)));
 });
 
 test('internal and future stacks stay outside the approved presentation set', () => {
   const container = makeElement();
-  // A future Hybrid stack may land in the controller, but it must not appear
-  // until the accepted presentation allowlist explicitly includes it.
-  const withHybrid = [...CONTROLLER_STACKS, { id: 'hybrid', label: 'Hybrid', available: true }];
-  renderMapStackChips(container, withHybrid, { activeId: 'photoreal', doc });
+  // A future stack may land in the controller, but it must not appear until
+  // the accepted presentation allowlist explicitly includes it.
+  const withFuture = [...CONTROLLER_STACKS, { id: 'lidar', label: 'LiDAR', available: true }];
+  renderMapStackChips(container, withFuture, { activeId: 'photoreal', doc });
 
-  assert.equal(container.children.length, 4);
-  assert.doesNotMatch(container.children.map(chipText).join(' '), /Hybrid/);
+  assert.equal(container.children.length, 5);
+  assert.doesNotMatch(container.children.map(chipText).join(' '), /LiDAR/);
 });
 
 test('re-rendering replaces the previous chips instead of stacking a second row', () => {

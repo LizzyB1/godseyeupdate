@@ -220,11 +220,19 @@ const CABLE_GLOBE_STACK_IDS = Object.freeze(
  * GroundPolylinePrimitive's emitted command sets. BOTH is the safe fallback
  * for an unknown stack — it renders on every surface, exactly the shipped
  * pre-optimization behavior.
+ *
+ * `hybrid` is the one KNOWN id that deliberately maps to BOTH rather than
+ * picking a single pass: it shows the Google tileset AND the terrain-backed
+ * globe at once (see MapStackController#_activateGlobeStack), so a cable
+ * classified against only one surface would clip through or vanish under
+ * whichever one it skipped. This is an intentional mapping, not the
+ * unmapped-id fallback the same value below happens to share.
  * @param {string|null|undefined} activeId MapStackController stack id.
  * @returns {Cesium.ClassificationType}
  */
 export function cableClassificationTypeForStack(activeId) {
   if (activeId === 'photoreal') return Cesium.ClassificationType.CESIUM_3D_TILE;
+  if (activeId === 'hybrid') return Cesium.ClassificationType.BOTH;
   if (CABLE_GLOBE_STACK_IDS.has(activeId)) return Cesium.ClassificationType.TERRAIN;
   return Cesium.ClassificationType.BOTH;
 }

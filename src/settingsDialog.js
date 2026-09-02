@@ -1,12 +1,23 @@
 import { API_KEY_DEFS, getApiKeyOverride, setApiKeyOverride } from './apiKeys.js';
+import { FIRST_RUN_MISSIONS, environmentalLabel, runFirstRunChoice } from './firstRunExperience.js';
+import { SERVER_API_KEY_DEFS } from './data/sessionSettings.js';
+import { saveSessionSettings } from './sessionSettingsClient.js';
 
 /**
  * @file Settings dialog: gear icon (top-left) opening a small panel with —
  * a global "panel transparency" slider (drives `--gev-panel-bg-alpha`, the
  * one CSS variable every panel/box/chip's background reads through — see
- * style.css's `:root`), API key inputs (browser-local overrides, since a
- * page can't write the build's `.env` — see src/apiKeys.js) with a
- * Save & Reload button, and a Reset panel layout action for
+ * style.css's `:root`), client API key inputs (browser-local overrides,
+ * since a page can't write the build's `.env` — see src/apiKeys.js) with a
+ * Save & Reload button, server-side API key inputs (FIRMS/TomTom/AISStream/
+ * OpenAI/OpenSky — the ones `.env.example` documents as SERVER-SIDE ONLY,
+ * previously missing from this dialog entirely — persisted through
+ * `/api/settings` into the transportable `gev.settings.json` file, see
+ * src/data/sessionSettings.js and src/sessionSettingsClient.js), a Mission
+ * section that runs the same starting scenarios the old auto-popping
+ * first-run launcher offered (see src/firstRunExperience.js — this dialog
+ * reuses its mission table and runner, just triggered on demand instead of
+ * automatically on load), and a Reset panel layout action for
  * src/panelDrag.js's draggable panels.
  *
  * Deliberately independent of the main Cesium bootstrap in main.js
@@ -14,12 +25,27 @@ import { API_KEY_DEFS, getApiKeyOverride, setApiKeyOverride } from './apiKeys.js
  * block) so a person who's missing an API key entirely — the one case
  * where the app itself fails to boot — can still open this dialog and add
  * one, rather than being stuck on an error screen with no way to recover
- * without editing `.env` on disk.
+ * without editing `.env` on disk. The Mission section's buttons stay
+ * disabled until `attachMissionRunner()` is called with a live
+ * styleManager/dataManager — which never happens on a failed boot, so they
+ * correctly stay inert rather than throwing against objects that don't
+ * exist yet.
  *
  * @module settingsDialog
  */
 
-const OPACITY_STORAGE_KEY = 'godsEyeView.settings.panelBgAlpha';
+/** Build-time values for the two CLIENT-EXPOSED keys (see apiKeys.js) — read
+ * once via literal `import.meta.env.<ID>` accesses (Vite's `define` only
+ * rewrites static property access, not a dynamic lookup) so the Settings
+ * placeholder can say "using your .env value" instead of a vague "if any". */
+const BUILD_TIME_CLIENT_KEYS = {
+  CESIUM_ION_TOKEN: import.meta.env.CESIUM_ION_TOKEN,
+  GOOGLE_MAPS_API_KEY: import.meta.env.GOOGLE_MAPS_API_KEY,
+};
+
+/** Exported so main.js's session-settings restore/autosave (src/sessionSettingsClient.js)
+ * can read/write the same localStorage entry without a private hook into this module. */
+export const OPACITY_STORAGE_KEY = 'godsEyeView.settings.panelBgAlpha';
 const MIN_ALPHA = 0.2;
 const MAX_ALPHA = 0.95;
 const DEFAULT_ALPHA = 0.72;
@@ -48,10 +74,20 @@ function restoreAlphaEarly() {
   applyAlpha(loadStoredAlpha());
 }
 
+/** Missions offered from Settings — every FIRST_RUN_MISSIONS entry except
+ * the no-op 'explore' choice, which has nothing to run from a dialog. */
+const SETTINGS_MISSION_CHOICES = ['contacts', 'space-missions', 'environmental'];
+
 export class SettingsDialog {
   constructor() {
     restoreAlphaEarly();
+    /** Set by attachMissionRunner() once styleManager/dataManager exist. */
+    this._missionDeps = null;
+    this._missionBusy = false;
+    /** @type {?Array<{id:string,label:string,help:string,configured:boolean,source:string}>} */
+    this._serverKeyStatus = null;
     this._build();
+    void this._loadServerKeyStatus();
   }
 
   _build() {
@@ -77,12 +113,28 @@ export class SettingsDialog {
     dialog.setAttribute('aria-modal', 'true');
     dialog.setAttribute('aria-labelledby', 'gev-settings-title');
 
-    const apiKeyRows = API_KEY_DEFS.map((def) => `
+    const apiKeyRows = API_KEY_DEFS.map((def) => {
+      let placeholder;
+      if (getApiKeyOverride(def.id)) placeholder = '•••••••• (saved here — leave blank to keep)';
+      else if (BUILD_TIME_CLIENT_KEYS[def.id]) placeholder = 'using your .env value — leave blank to keep';
+      else placeholder = 'not set — add a key or the app can\'t start';
+      return `
       <label class="gev-settings-field" for="gev-key-${def.id}">
         <span class="gev-settings-field-label">${def.label}</span>
         <input type="password" id="gev-key-${def.id}" class="gev-settings-input"
           data-key-id="${def.id}" autocomplete="off" spellcheck="false"
-          placeholder="${getApiKeyOverride(def.id) ? '•••••••• (saved — leave blank to keep)' : 'not set — using build default, if any'}">
+          placeholder="${placeholder}">
+        <span class="gev-settings-field-help">${def.help}</span>
+      </label>
+    `;
+    }).join('');
+
+    const serverKeyRows = SERVER_API_KEY_DEFS.map((def) => `
+      <label class="gev-settings-field" for="gev-server-key-${def.id}">
+        <span class="gev-settings-field-label">${def.label}</span>
+        <input type="password" id="gev-server-key-${def.id}" class="gev-settings-input"
+          data-server-key-id="${def.id}" autocomplete="off" spellcheck="false"
+          placeholder="checking…">
         <span class="gev-settings-field-help">${def.help}</span>
       </label>
     `).join('');
@@ -104,16 +156,53 @@ export class SettingsDialog {
       </section>
 
       <section class="gev-settings-section">
-        <h3 class="gev-settings-section-title">API keys</h3>
+        <h3 class="gev-settings-section-title">Mission</h3>
         <p class="gev-settings-section-help">
-          A running page can't edit this project's <code>.env</code> file directly — a key saved here
-          is stored only in this browser and takes priority over the build's own key. Saving reloads
-          the page so every module picks it up cleanly.
+          Jump straight into a starting scenario — each one enables its layers/context exactly like
+          clicking them yourself. This replaces the picker that used to pop up automatically on load.
+        </p>
+        <div class="gev-settings-mission-grid">
+          <button type="button" class="gev-settings-mission-btn" data-mission="contacts" disabled title="Loading…">
+            <strong>Live Contacts</strong>
+            <small>Aircraft, vessels and nearby intelligence</small>
+          </button>
+          <button type="button" class="gev-settings-mission-btn" data-mission="space-missions" disabled title="Loading…">
+            <strong>Space Missions</strong>
+            <small>Launches, spacecraft and orbital context</small>
+          </button>
+          <button type="button" class="gev-settings-mission-btn" data-mission="environmental" disabled title="Loading…">
+            <strong data-mission-environmental-title>${environmentalLabel().title}</strong>
+            <small>Live earthquakes and active fires, from USGS and NASA</small>
+          </button>
+        </div>
+      </section>
+
+      <section class="gev-settings-section">
+        <h3 class="gev-settings-section-title">API keys — client</h3>
+        <p class="gev-settings-section-help">
+          Cesium and Google Maps run in the browser, so these two keys ship inside the page itself —
+          a key saved here is stored only in this browser and takes priority over the build's own key.
+          Saving reloads the page so every module picks it up cleanly.
         </p>
         ${apiKeyRows}
         <div class="gev-settings-actions">
           <button type="button" id="gev-settings-save-keys" class="gev-settings-btn gev-settings-btn-primary">Save &amp; Reload</button>
           <button type="button" id="gev-settings-clear-keys" class="gev-settings-btn">Clear saved keys</button>
+        </div>
+      </section>
+
+      <section class="gev-settings-section">
+        <h3 class="gev-settings-section-title">API keys — server</h3>
+        <p class="gev-settings-section-help">
+          These live data feeds (fires, traffic, AIS, voice, aircraft) run their key server-side and
+          never send it to the browser. A key saved here is written to <code>gev.settings.json</code>
+          at the project root — git-ignored, same as <code>.env</code>, and carried along if you copy
+          that file into a new clone — and takes effect immediately, no reload needed.
+        </p>
+        ${serverKeyRows}
+        <div class="gev-settings-actions">
+          <button type="button" id="gev-settings-save-server-keys" class="gev-settings-btn gev-settings-btn-primary">Save server keys</button>
+          <button type="button" id="gev-settings-clear-server-keys" class="gev-settings-btn">Clear saved server keys</button>
         </div>
       </section>
 
@@ -147,6 +236,10 @@ export class SettingsDialog {
       saveAlpha(alpha);
     });
 
+    for (const button of dialog.querySelectorAll('[data-mission]')) {
+      button.addEventListener('click', () => this._runMission(button.dataset.mission));
+    }
+
     dialog.querySelector('#gev-settings-save-keys').addEventListener('click', () => {
       let changed = false;
       for (const def of API_KEY_DEFS) {
@@ -168,10 +261,88 @@ export class SettingsDialog {
       window.location.reload();
     });
 
+    dialog.querySelector('#gev-settings-save-server-keys').addEventListener('click', () => {
+      void this._saveServerKeys(dialog);
+    });
+
+    dialog.querySelector('#gev-settings-clear-server-keys').addEventListener('click', () => {
+      void this._saveServerKeys(dialog, { clearAll: true });
+    });
+
     dialog.querySelector('#gev-settings-reset-layout').addEventListener('click', () => {
       window.__godsEyeView?.panelDrag?.resetAll?.();
       this._flashStatus(dialog, 'Panel positions reset.');
     });
+  }
+
+  /**
+   * Fetch server-side key configured/source status from `/api/settings` and
+   * update each row's placeholder to reflect it. Never shows a secret value
+   * (the endpoint doesn't return one) — only whether one is set and whether
+   * it came from the transportable file or `.env`/shell.
+   */
+  async _loadServerKeyStatus() {
+    try {
+      const response = await fetch('/api/settings', { headers: { Accept: 'application/json' } });
+      if (!response.ok) return;
+      const data = await response.json();
+      this._serverKeyStatus = Array.isArray(data?.apiKeyStatus) ? data.apiKeyStatus : null;
+    } catch {
+      this._serverKeyStatus = null;
+    }
+    if (!this._serverKeyStatus) return;
+    for (const status of this._serverKeyStatus) {
+      const input = this._dialog?.querySelector(`[data-server-key-id="${status.id}"]`);
+      if (!input) continue;
+      if (status.source === 'file') input.placeholder = '•••••••• (saved here — leave blank to keep)';
+      else if (status.source === 'env') input.placeholder = 'using your .env value — leave blank to keep';
+      else input.placeholder = 'not set';
+    }
+  }
+
+  /**
+   * Save (or clear) server-side API keys via `PUT /api/settings`, then
+   * refresh each row's status from the response instead of re-fetching.
+   * @param {HTMLElement} dialog
+   * @param {{clearAll?: boolean}} [opts]
+   */
+  async _saveServerKeys(dialog, { clearAll = false } = {}) {
+    const patchApiKeys = {};
+    let changed = false;
+    for (const def of SERVER_API_KEY_DEFS) {
+      if (clearAll) {
+        patchApiKeys[def.id] = '';
+        changed = true;
+        continue;
+      }
+      const input = dialog.querySelector(`[data-server-key-id="${def.id}"]`);
+      const value = input?.value.trim() || '';
+      if (!value) continue; // blank = keep whatever's already saved
+      patchApiKeys[def.id] = value;
+      changed = true;
+    }
+    if (!changed) {
+      this._flashStatus(dialog, 'Nothing to save — enter a key first, or it\'s already saved.');
+      return;
+    }
+    const result = await saveSessionSettings({ apiKeys: patchApiKeys });
+    if (!result?.ok) {
+      this._flashStatus(dialog, 'Could not save server keys — is the dev server running?');
+      return;
+    }
+    this._serverKeyStatus = Array.isArray(result.apiKeyStatus) ? result.apiKeyStatus : null;
+    for (const def of SERVER_API_KEY_DEFS) {
+      const input = dialog.querySelector(`[data-server-key-id="${def.id}"]`);
+      if (input) input.value = '';
+    }
+    for (const status of this._serverKeyStatus || []) {
+      const input = dialog.querySelector(`[data-server-key-id="${status.id}"]`);
+      if (!input) continue;
+      if (status.source === 'file') input.placeholder = '•••••••• (saved here — leave blank to keep)';
+      else if (status.source === 'env') input.placeholder = 'using your .env value — leave blank to keep';
+      else input.placeholder = 'not set';
+    }
+    this._flashStatus(dialog, clearAll ? 'Server keys cleared.' : 'Server keys saved — takes effect immediately.');
   }
 
   _flashStatus(dialog, text) {
@@ -187,11 +358,87 @@ export class SettingsDialog {
     this._statusTimer = window.setTimeout(() => status.classList.remove('visible'), 2400);
   }
 
+  /**
+   * Apply a panel transparency value restored from the transportable session
+   * file (see main.js's boot sequence / src/data/sessionSettings.js). Unlike
+   * the slider's own `input` handler this may fire AFTER `_build()` already
+   * rendered the slider from whatever `localStorage` held at module-load
+   * time (the file fetch is async, `_build()` is not) — so this also
+   * corrects the live slider element, not just the stored/applied value.
+   * @param {number} alpha
+   */
+  applyPanelAlpha(alpha) {
+    const value = Number(alpha);
+    if (!Number.isFinite(value)) return;
+    const clamped = clampAlpha(value);
+    applyAlpha(clamped);
+    saveAlpha(clamped);
+    const slider = this._dialog?.querySelector('#gev-opacity-slider');
+    if (slider) slider.value = String(clamped);
+  }
+
   setOpen(open) {
     this._backdrop.hidden = !open;
     this._toggle.classList.toggle('is-active', open);
     this._toggle.setAttribute('aria-pressed', String(open));
     if (open) this._dialog.querySelector('.gev-settings-close')?.focus();
+  }
+
+  /**
+   * Enable the Mission section once the app has actually booted. Called from
+   * main.js after styleManager/dataManager exist — never on a failed boot
+   * (missing API key), so the buttons correctly stay disabled there instead
+   * of running a mission against objects that don't exist.
+   * @param {{styleManager: object, dataManager: object}} deps
+   */
+  attachMissionRunner({ styleManager, dataManager }) {
+    this._missionDeps = { styleManager, dataManager };
+    const title = this._dialog.querySelector('[data-mission-environmental-title]');
+    if (title) title.textContent = environmentalLabel().title;
+    for (const button of this._dialog.querySelectorAll('[data-mission]')) {
+      button.disabled = false;
+      button.title = '';
+    }
+  }
+
+  /**
+   * Run one mission choice through the same table/runner the old auto-
+   * popping launcher used (src/firstRunExperience.js) — a mission tile here
+   * is a real person choosing it, so layers persist exactly as clicking
+   * those rows would (`origin: 'user'`).
+   * @param {string} choice - One of SETTINGS_MISSION_CHOICES.
+   */
+  async _runMission(choice) {
+    if (!this._missionDeps || this._missionBusy || !SETTINGS_MISSION_CHOICES.includes(choice)) return;
+    const { styleManager, dataManager } = this._missionDeps;
+    const mission = FIRST_RUN_MISSIONS[choice];
+    this._missionBusy = true;
+    this._flashStatus(this._dialog, mission?.busyText || 'Working…');
+    let outcome = null;
+    try {
+      outcome = await runFirstRunChoice(choice, {
+        setContextMode: async (mode) => {
+          const result = await styleManager.setContextMode(mode);
+          if (result?.ok) {
+            styleManager.setPanelCollapsed?.('global-context-panel', false, { explicit: true });
+          }
+          return result;
+        },
+        setLayerEnabled: (layerId) => dataManager.setEnabled(layerId, true, { origin: 'user' }),
+        flyToGlobe: () => styleManager.resetToGlobeView(),
+      });
+    } catch (error) {
+      console.warn('[Settings] Mission launch failed:', error);
+    }
+    this._missionBusy = false;
+    if (outcome?.ok) {
+      this._flashStatus(this._dialog, 'Mission started.');
+      this.setOpen(false);
+      return;
+    }
+    const failed = outcome?.failedLayerIds?.length ? outcome.failedLayerIds : outcome?.result?.failedLayerIds;
+    const detail = Array.isArray(failed) && failed.length ? ` (${failed.join(', ')})` : '';
+    this._flashStatus(this._dialog, `Could not start that mission${detail}.`);
   }
 }
 

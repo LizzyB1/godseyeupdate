@@ -1,6 +1,6 @@
 import * as Cesium from 'cesium';
 import { StyleManager } from './ui.js';
-import { flyToAustin } from './camera.js';
+import { flyToPalma } from './camera.js';
 import { DataLayerManager } from './data/manager.js';
 import flightsLayer from './data/flights.js';
 import militaryFlightsLayer from './data/militaryFlights.js';
@@ -15,7 +15,7 @@ import aisLiveVesselsLayer from './data/aisLiveVessels.js';
 import militaryInstallationsLayer from './data/militaryInstallations.js';
 import militaryAwarenessLayer from './data/militaryAwareness.js';
 import localDataLayers from './data/localLayers.js';
-import { LAYER_STATE_REGISTRY } from './data/layerState.js';
+import { LAYER_STATE_REGISTRY, LAYER_STATE_STORAGE_KEY } from './data/layerState.js';
 import { registerDataCredits } from './data/dataCredits.js';
 import { SceneDirector } from './scenes/director.js';
 import { initGevVoiceCommands } from './voice/gevRealtime.js';
@@ -32,12 +32,12 @@ import {
 } from './renderGovernor.js';
 import { installScopeMask, setScopeMaskEnabled } from './scopeMask.js';
 import { initCameraControls } from './cameraControls.js';
-import { initFirstRunExperience } from './firstRunExperience.js';
 import { initGpsTrackOverlay } from './data/gpsTracks.js';
 import { initGpsTrackPanel } from './gpsTrackPanel.js';
 import { initPanelDragging } from './panelDrag.js';
 import { resolveApiKey } from './apiKeys.js';
-import { initSettingsDialog } from './settingsDialog.js';
+import { initSettingsDialog, OPACITY_STORAGE_KEY } from './settingsDialog.js';
+import { fetchSessionSettings, createSessionSettingsAutosave } from './sessionSettingsClient.js';
 
 initLogoGaze();
 // Independent of the Cesium bootstrap below (and its try/catch): a missing
@@ -45,6 +45,12 @@ initLogoGaze();
 // one recovery path for that case — a person can open Settings and add a
 // key without editing .env on disk. See src/settingsDialog.js.
 window.__godsEyeView = { ...(window.__godsEyeView || {}), settingsDialog: initSettingsDialog() };
+
+// Kick off the transportable-session-settings fetch as early as possible
+// (see src/data/sessionSettings.js, src/sessionSettingsClient.js) so it
+// resolves in parallel with the Cesium/Google-3D-Tiles bootstrap below
+// instead of adding to it — init() awaits this promise, not a fresh fetch.
+const sessionSettingsPromise = fetchSessionSettings();
 
 /**
  * Extract a human-readable error message from any thrown value.
@@ -83,6 +89,22 @@ async function init() {
 
   try {
     loaderStatus.textContent = 'Configuring viewer...';
+
+    // Restore transportable session settings (src/data/sessionSettings.js)
+    // as early as possible — before the layer-state coordinator or the
+    // opacity slider read `localStorage`, so a fresh clone that copied over
+    // gev.settings.json (or a dev server with saved state) comes back
+    // looking the way it did last session instead of at hardcoded defaults.
+    // Never throws (fetchSessionSettings swallows its own errors) and never
+    // blocks longer than its own internal timeout, so a clone with no
+    // saved file, or no dev server at all, boots exactly as before.
+    const sessionSettings = await sessionSettingsPromise;
+    if (sessionSettings?.layerState) {
+      try { localStorage.setItem(LAYER_STATE_STORAGE_KEY, sessionSettings.layerState); } catch { /* storage unavailable */ }
+    }
+    if (sessionSettings?.panelAlpha != null) {
+      window.__godsEyeView?.settingsDialog?.applyPanelAlpha?.(sessionSettings.panelAlpha);
+    }
 
     // Set Cesium Ion token for World Terrain — a browser-saved override
     // (settings dialog) takes priority over the build-time .env value; see
@@ -187,10 +209,18 @@ async function init() {
 
     loaderStatus.textContent = 'Initializing systems...';
 
+    // A saved session's map stack wins over the hardcoded default — but a
+    // share-link (checked below via `styleManager.hasShareState`) still wins
+    // over THIS, exactly as it already does for the layer state seeded
+    // above: `_setMapStack()` runs during share restore and unconditionally
+    // overwrites whatever stack this boot call lands on, so applying the
+    // saved stack here first is safe even when a share link is present.
+    const restoredMapStack = sessionSettings?.mapStack;
+    const bootStack = restoredMapStack || (tileset ? 'photoreal' : 'osm');
     const mapStackController = new MapStackController(viewer, {
       googleTileset: tileset,
       cesiumToken,
-      initialStack: tileset ? 'photoreal' : 'osm',
+      initialStack: bootStack,
       // Task 5 (height-datum fix): rebroadcast stack changes as a window
       // CustomEvent so data layers (CCTV per-regime ground resolution) can
       // react without coupling MapStackController to layer modules. Fires on
@@ -201,7 +231,7 @@ async function init() {
       },
       onError: (message) => console.warn('[MapStack]', message),
     });
-    await mapStackController.setStack(tileset ? 'photoreal' : 'osm', { silent: true });
+    await mapStackController.setStack(bootStack, { silent: true });
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
     const styleManager = new StyleManager(viewer, { mapStackController });
@@ -211,12 +241,27 @@ async function init() {
     const weatherEffects = null;
     const cockpitCloudEffects = initCockpitCloudEffects(viewer);
 
-    // If no share link state, do default fly-to Austin
-    if (!styleManager.hasShareState) {
-      loaderStatus.textContent = 'Flying to Austin, TX...';
-      flyToAustin(viewer);
-    } else {
+    // A share link always wins (it's an explicit, just-clicked intent). Next,
+    // a saved session camera pose — set directly with no flight animation,
+    // since this is a restore of where the operator already was, not a
+    // scripted arrival. Otherwise fall back to the default cinematic
+    // fly-to-Palma used on a genuinely fresh clone/browser.
+    const restoredCamera = sessionSettings?.camera;
+    if (styleManager.hasShareState) {
       loaderStatus.textContent = 'Restoring shared view...';
+    } else if (restoredCamera) {
+      loaderStatus.textContent = 'Restoring last session...';
+      viewer.camera.setView({
+        destination: Cesium.Cartesian3.fromDegrees(restoredCamera.lon, restoredCamera.lat, restoredCamera.height),
+        orientation: {
+          heading: restoredCamera.heading,
+          pitch: restoredCamera.pitch,
+          roll: restoredCamera.roll,
+        },
+      });
+    } else {
+      loaderStatus.textContent = 'Flying to Palma, Spain...';
+      flyToPalma(viewer);
     }
 
     // Initialize data layer manager
@@ -268,20 +313,16 @@ async function init() {
       new Promise((resolve) => setTimeout(resolve, 1000)),
     ]).finally(() => {
       loadingScreen.classList.add('hidden');
-      // Reveal only after the loading cover has yielded. transitionend can be
-      // absent under reduced motion, so a bounded fallback makes this reliable.
-      let firstRunRevealed = false;
-      const revealFirstRun = () => {
-        if (firstRunRevealed) return;
-        firstRunRevealed = true;
-        // dataManager is passed explicitly: the globe missions enable bundled
-        // keyless layers through it, and reaching for styleManager._dataManager
-        // would make a private field part of this feature's contract.
-        initFirstRunExperience({ styleManager, dataManager });
-      };
-      loadingScreen.addEventListener('transitionend', revealFirstRun, { once: true });
-      setTimeout(revealFirstRun, 900);
     });
+
+    // The mission launcher no longer auto-shows on load (product change: it
+    // now lives as an on-demand "Mission" section inside Settings, so a
+    // returning operator isn't interrupted on every fresh session). Wire the
+    // dialog's mission buttons up now that styleManager/dataManager exist —
+    // dataManager is passed explicitly: the globe missions enable bundled
+    // keyless layers through it, and reaching for styleManager._dataManager
+    // would make a private field part of this feature's contract.
+    window.__godsEyeView?.settingsDialog?.attachMissionRunner?.({ styleManager, dataManager });
 
     // Expose for debugging
     // Idle render governor: flips the scene into requestRenderMode whenever
@@ -346,6 +387,49 @@ async function init() {
     // already hidden, and waiting for the next transition would leave the
     // loop burning behind a hidden tab. (perf wave 2 fix)
     syncVisibilitySuspension();
+
+    // Transportable session-settings autosave (src/data/sessionSettings.js,
+    // src/sessionSettingsClient.js) — keeps `gev.settings.json` current so
+    // the NEXT boot's restore above has something fresh to read. Reads
+    // straight from `localStorage`/live viewer/controller state rather than
+    // hooking into each individual subsystem's own change events (layer
+    // toggles, the transparency slider) — cheap enough to poll, and every
+    // one of those already commits to `localStorage` synchronously the
+    // moment it changes, so a snapshot never observes a half-applied change.
+    const scheduleSessionSave = createSessionSettingsAutosave();
+    let lastSessionSnapshotJson = null;
+    const captureSessionSnapshot = () => {
+      const carto = viewer.camera.positionCartographic;
+      const camera = carto ? {
+        lon: Cesium.Math.toDegrees(carto.longitude),
+        lat: Cesium.Math.toDegrees(carto.latitude),
+        height: carto.height,
+        heading: viewer.camera.heading,
+        pitch: viewer.camera.pitch,
+        roll: viewer.camera.roll,
+      } : null;
+      let panelAlpha = null;
+      try {
+        const stored = localStorage.getItem(OPACITY_STORAGE_KEY);
+        const raw = stored === null ? NaN : Number(stored);
+        panelAlpha = Number.isFinite(raw) ? raw : null;
+      } catch { /* storage unavailable */ }
+      let layerState = null;
+      try { layerState = localStorage.getItem(LAYER_STATE_STORAGE_KEY) || null; } catch { /* storage unavailable */ }
+      return { camera, mapStack: mapStackController.getActiveId(), panelAlpha, layerState };
+    };
+    const saveSessionIfChanged = () => {
+      const snapshot = captureSessionSnapshot();
+      const json = JSON.stringify(snapshot);
+      if (json === lastSessionSnapshotJson) return;
+      lastSessionSnapshotJson = json;
+      scheduleSessionSave(snapshot);
+    };
+    viewer.camera.moveEnd.addEventListener(saveSessionIfChanged);
+    window.addEventListener('gev:map-stack-changed', saveSessionIfChanged);
+    // Catch-all for state changes without a dedicated event above (layer
+    // toggles, the transparency slider) — cheap no-op when nothing changed.
+    setInterval(saveSessionIfChanged, 20000);
 
     window.__godsEyeView = {
       ...window.__godsEyeView,

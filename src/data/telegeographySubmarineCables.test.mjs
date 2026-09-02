@@ -171,8 +171,19 @@ test('cable ground lines classify against exactly the active surface on every st
 
   // Every id that actually ships must be a KNOWN id: a stack added to
   // MAP_STACKS without a mapping here silently loses its halved command set,
-  // so the omission fails loudly instead of degrading quietly.
+  // so the omission fails loudly instead of degrading quietly. `hybrid` is
+  // the one deliberate exception — it renders the Google tileset AND the
+  // terrain-backed globe together, so BOTH is its real, intentional mapping
+  // rather than the same value's unmapped-id fallback meaning.
   for (const stack of MAP_STACKS) {
+    if (stack.id === 'hybrid') {
+      assert.equal(
+        cableClassificationTypeForStack(stack.id),
+        Cesium.ClassificationType.BOTH,
+        'hybrid shows both surfaces at once, so BOTH must be its deliberate mapping',
+      );
+      continue;
+    }
     assert.notEqual(
       cableClassificationTypeForStack(stack.id),
       Cesium.ClassificationType.BOTH,

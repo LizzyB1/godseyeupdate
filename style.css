@@ -1239,7 +1239,7 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 
 .map-stack-chip-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 4px;
 }
 
@@ -9197,31 +9197,187 @@ body.scene-playback-mode #first-run-launcher {
 }
 
 /* ═══════════════════════════════════════════════
-   Camera Look/Rotate/Zoom Pad (src/cameraControls.js)
-   Arrows/WASD look, corner cells = diagonals, Q/E roll, R/F zoom.
+   Camera Move/Pitch/Rotate/Zoom Control Box (src/cameraControls.js)
+   Arrows/WASD strafe, corner cells = diagonal move, PageUp/PageDown or 1/3
+   pitch, Q/E roll, R/F zoom. One movable + resizable box: drag the header
+   to reposition, drag the bottom-right corner to resize.
    ═══════════════════════════════════════════════ */
 .camctl-pad {
   position: fixed;
-  left: 24px;
-  bottom: calc(2vh + 4.5rem);
   z-index: 146;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--btn-radius);
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.camctl-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--glass-border);
+  background: rgba(9, 18, 27, 0.35);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.camctl-header.is-dragging { cursor: grabbing; }
+
+.camctl-grip {
+  flex: 0 0 auto;
+  font: 700 11px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.camctl-title {
+  flex: 1 1 auto;
+  font: 700 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.camctl-heading-chip {
+  flex: 0 0 auto;
+  font: 700 10px/1 var(--font-mono);
+  color: var(--accent);
+  background: rgba(9, 18, 27, 0.6);
+  border: 1px solid var(--glass-border);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+
+.camctl-body {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  pointer-events: none;
+  padding: 10px 8px 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
-.camctl-pad > * { pointer-events: auto; }
+.camctl-body::-webkit-scrollbar {
+  width: 5px;
+}
+.camctl-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+}
+.camctl-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(0, 212, 255, 0.65), rgba(0, 212, 255, 0.2));
+  border-radius: 999px;
+}
 
+/* ── Orientation readout: compass + rotating needle/lens + text ────── */
+.camctl-orient {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.camctl-orient-compass {
+  width: 42%;
+  max-width: 62px;
+  min-width: 36px;
+  aspect-ratio: 1;
+}
+
+.camctl-orient-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+.camctl-orient-ring {
+  fill: rgba(9, 18, 27, 0.4);
+  stroke: var(--glass-border);
+  stroke-width: 1;
+}
+
+.camctl-orient-n {
+  fill: var(--text-dim);
+  font: 700 6px var(--font-mono);
+}
+
+.camctl-orient-hub {
+  fill: var(--text-dim);
+}
+
+.camctl-orient-needle {
+  transition: transform 60ms linear;
+}
+
+.camctl-orient-cone {
+  fill: var(--accent);
+  opacity: 0.85;
+}
+
+.camctl-orient-cam {
+  transition: transform 60ms linear;
+}
+
+.camctl-orient-lens-body {
+  fill: var(--bg-dark, #0a1218);
+  stroke: var(--accent);
+  stroke-width: 1.4;
+}
+
+.camctl-orient-lens {
+  fill: var(--accent);
+}
+
+.camctl-orient-readout {
+  display: flex;
+  gap: 6px;
+  font: 500 8px/1 var(--font-mono);
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+}
+.camctl-orient-field {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+.camctl-orient-field b {
+  font-weight: 700;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+.camctl-orient-field i {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+/* ── Move (strafe) pad ───────────────────────────────────────────── */
 .camctl-grid {
   display: grid;
-  grid-template-columns: repeat(3, 34px);
-  grid-template-rows: repeat(3, 34px);
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
   grid-template-areas:
     'nw n ne'
     'w i e'
     'sw s se';
   gap: 4px;
+  width: 78%;
+  max-width: 110px;
+  min-width: 96px;
+  aspect-ratio: 1;
 }
 .camctl-nw { grid-area: nw; }
 .camctl-n { grid-area: n; }
@@ -9236,15 +9392,13 @@ body.scene-playback-mode #first-run-launcher {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 100%;
+  height: 100%;
   border: 1px solid var(--glass-border);
   border-radius: var(--btn-radius);
   background: var(--glass-bg);
-  backdrop-filter: blur(20px) saturate(1.3);
-  -webkit-backdrop-filter: blur(20px) saturate(1.3);
   color: var(--text-secondary);
-  font: 600 14px/1 var(--font-sans);
+  font: 600 13px/1 var(--font-sans);
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
@@ -9269,8 +9423,8 @@ body.scene-playback-mode #first-run-launcher {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 100%;
+  height: 100%;
   border-radius: 999px;
   border: 1px solid var(--glass-border);
   background: transparent;
@@ -9279,11 +9433,24 @@ body.scene-playback-mode #first-run-launcher {
   cursor: help;
 }
 
+/* ── Dedicated pitch pair (split out of the move pad) ───────────────── */
+.camctl-pitch {
+  display: flex;
+  gap: 8px;
+}
+.camctl-pitch-btn {
+  width: 30px;
+  height: 26px;
+  font: 700 13px/1 var(--font-mono);
+}
+
 .camctl-aux {
   display: flex;
   gap: 10px;
 }
 .camctl-aux-btn {
+  width: 30px;
+  height: 30px;
   font: 700 15px/1 var(--font-mono);
 }
 
@@ -9292,10 +9459,43 @@ body.scene-playback-mode #first-run-launcher {
   letter-spacing: 0.04em;
   color: var(--text-dim);
   text-align: center;
-  white-space: nowrap;
   padding: 4px 8px;
   border-radius: 6px;
   background: rgba(9, 18, 27, 0.6);
+}
+
+/* ── Resize handle (bottom-right corner) ─────────────────────────────── */
+.camctl-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 3;
+  touch-action: none;
+}
+.camctl-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--glass-border) 0, var(--glass-border) 1.4px,
+    transparent 1.4px, transparent 4px
+  );
+  transition: background-image var(--transition-fast);
+}
+.camctl-resize-handle:hover::after,
+.camctl-resize-handle.is-active::after {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--accent) 0, var(--accent) 1.4px,
+    transparent 1.4px, transparent 4px
+  );
 }
 
 @media (max-width: 720px), (max-height: 520px) {
@@ -9303,7 +9503,10 @@ body.scene-playback-mode #first-run-launcher {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .camctl-btn { transition: none; }
+  .camctl-btn,
+  .camctl-orient-needle,
+  .camctl-orient-cam,
+  .camctl-resize-handle::after { transition: none; }
 }
 
 /* ── GPS track loader (module loader for the NMEA/GPX toolkit) ───────────── */
@@ -9720,6 +9923,46 @@ body.scene-playback-mode #first-run-launcher {
 .gev-settings-field-help {
   font: 400 10.5px/1.4 var(--font-sans);
   color: var(--text-dim);
+}
+
+.gev-settings-mission-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gev-settings-mission-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+.gev-settings-mission-btn strong {
+  font: 700 11.5px/1.3 var(--font-sans);
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+.gev-settings-mission-btn small {
+  font: 400 10.5px/1.4 var(--font-sans);
+  color: var(--text-dim);
+}
+.gev-settings-mission-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.06);
+}
+.gev-settings-mission-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .gev-settings-actions {

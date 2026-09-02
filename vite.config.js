@@ -18,6 +18,7 @@
  *  13. Weather effects — camera-local Open-Meteo observations without news/geocoding overhead
  *  14. Rocket launches — recent Launch Library 2 mission metadata
  *  15. Radio Browser — public-domain station directory and click counting
+ *  16. Session settings — transportable camera/layers/map-stack/API-key state
  *
  * Also exposes Cesium and Google 3D Tiles API keys to the
  * client via `import.meta.env.*` defines.
@@ -61,6 +62,15 @@ import {
   validTerrainResult,
 } from './src/data/terrainHeightsProxy.js';
 import { VOICE_MODELS, isKnownVoiceTier, resolveVoiceModel } from './src/voice/voiceCost.js';
+import {
+  SETTINGS_FILE_NAME,
+  SERVER_API_KEY_DEFS,
+  createDefaultSessionSettings,
+  normalizeSessionSettings,
+  mergeSessionSettings,
+  describeServerKeyStatus,
+  toClientSettings,
+} from './src/data/sessionSettings.js';
 
 /** Resolve __dirname for ESM context. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -5265,6 +5275,129 @@ function readRequestBody(req, maxBytes = 1024 * 1024) {
 }
 
 /**
+ * Vite plugin: transportable session settings — `GET`/`PUT /api/settings`,
+ * backed by `gev.settings.json` at the project root (git-ignored, same as
+ * `.env`). Persists "everything for the next session" per the user's
+ * request: camera pose, active map stack, layer on/off state (the opaque
+ * string `src/data/layerState.js` already keeps in `localStorage` — this
+ * proxy treats it as an opaque pass-through, never re-parses it), panel
+ * transparency, and server-side API keys (the ones NOT already covered by
+ * `src/apiKeys.js`'s browser-local-override mechanism, which only handles
+ * the two CLIENT-EXPOSED keys).
+ *
+ * A saved server-side API key doesn't just sit in the file — it's applied
+ * live via `applyServerKeyEnvOverrides()`, which overlays it onto
+ * `process.env` (the same variable every other proxy in this file reads
+ * its key from, e.g. `firmsProxy`'s `process.env.FIRMS_MAP_KEY`). That
+ * overlay runs once at server start and again after every save, so a key
+ * entered through Settings takes effect for the *next* request each of
+ * those proxies handles — no server restart, and no changes needed to any
+ * of their existing `process.env.X` read sites. A key that was already set
+ * via `.env`/shell is captured as `envBaseline` before the first overlay
+ * and always wins back once a saved override is cleared.
+ *
+ * `GET` never returns raw key values, even to this same-origin dev
+ * server's own client — only `{configured, source}` per key (see
+ * `describeServerKeyStatus`) — so the Settings UI can show accurate status
+ * ("saved here" / "set via .env" / "not set") without a secret ever
+ * reaching devtools for a key that didn't already leave the server anyway.
+ *
+ * @returns {import('vite').Plugin}
+ */
+function sessionSettingsProxy() {
+  const FILE_PATH = path.join(process.cwd(), SETTINGS_FILE_NAME);
+
+  /** @type {?object} in-memory cache of the normalized file contents */
+  let mem = null;
+  /** @type {?Record<string,string|undefined>} process.env snapshot taken before any file overlay */
+  let envBaseline = null;
+
+  async function load() {
+    if (mem) return mem;
+    try {
+      const raw = JSON.parse(await fsp.readFile(FILE_PATH, 'utf8'));
+      mem = normalizeSessionSettings(raw);
+    } catch {
+      mem = createDefaultSessionSettings();
+    }
+    return mem;
+  }
+
+  async function persist(settings) {
+    mem = settings;
+    try {
+      await fsp.writeFile(FILE_PATH, JSON.stringify(settings, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[session-settings-proxy] write failed:', err?.message || err);
+    }
+  }
+
+  /** Overlay saved server-side keys onto `process.env`, falling back to the original env/shell value. */
+  function applyServerKeyEnvOverrides(settings) {
+    if (!envBaseline) {
+      envBaseline = {};
+      for (const def of SERVER_API_KEY_DEFS) envBaseline[def.envVar] = process.env[def.envVar];
+    }
+    for (const def of SERVER_API_KEY_DEFS) {
+      const fileValue = settings?.apiKeys?.[def.id];
+      if (fileValue) {
+        process.env[def.envVar] = fileValue;
+      } else if (envBaseline[def.envVar]) {
+        process.env[def.envVar] = envBaseline[def.envVar];
+      } else {
+        delete process.env[def.envVar];
+      }
+    }
+  }
+
+  function respond(res, settings) {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({
+      ok: true,
+      settings: toClientSettings(settings),
+      apiKeyStatus: describeServerKeyStatus(settings, envBaseline || process.env),
+    }));
+  }
+
+  function install(middlewares) {
+    middlewares.use('/api/settings', async (req, res) => {
+      if (req.method === 'GET') {
+        const settings = await load();
+        applyServerKeyEnvOverrides(settings);
+        respond(res, settings);
+        return;
+      }
+      if (req.method === 'PUT') {
+        let patch;
+        try {
+          patch = JSON.parse(await readRequestBody(req));
+        } catch {
+          res.statusCode = 400;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ ok: false, error: 'Invalid JSON body' }));
+          return;
+        }
+        const current = await load();
+        const next = mergeSessionSettings(current, patch);
+        await persist(next);
+        applyServerKeyEnvOverrides(next);
+        respond(res, next);
+        return;
+      }
+      res.statusCode = 405;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ ok: false, error: 'Method not allowed' }));
+    });
+  }
+
+  return {
+    name: 'session-settings-proxy',
+    configureServer(server) { install(server.middlewares); },
+  };
+}
+
+/**
  * Vite plugin: nearby Google place labels for Realtime scene context.
  *
  * The Photorealistic 3D Tiles mesh does not expose rendered map labels as
@@ -7360,6 +7493,7 @@ export default defineConfig(({ mode }) => {
       trackBackfillProxies(),
       openAiRealtimeProxy(),
       googlePlacesContextProxy(),
+      sessionSettingsProxy(),
     ],
     server: {
       host: env.HOST || 'localhost',

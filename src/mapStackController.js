@@ -32,6 +32,17 @@ export const MAP_STACKS = [
     kind: 'osm',
     requiresIon: false,
   },
+  {
+    id: 'hybrid',
+    label: '3D + Terrain',
+    shortLabel: 'Hybrid',
+    kind: 'hybrid',
+    // No ion token needed: terrain still resolves (Cesium World Terrain when
+    // a token is present, the keyless Re:Earth mesh otherwise — the same
+    // fallback `_setWorldTerrainEnabled` already uses for OSM/Bing). Only
+    // the Google tileset itself gates availability, same as `photoreal`.
+    requiresIon: false,
+  },
 ];
 
 const DEFAULT_OSM_CREDIT = '© OpenStreetMap contributors';
@@ -149,7 +160,10 @@ export class MapStackController {
   isStackAvailable(id) {
     const stack = this.getStack(id);
     if (!stack) return false;
-    if (stack.kind === 'photoreal') return !!this.googleTileset;
+    // Hybrid needs the Google tileset just like photoreal does — it's the
+    // same tileset, just shown alongside a terrain-backed globe instead of
+    // in place of one.
+    if (stack.kind === 'photoreal' || stack.kind === 'hybrid') return !!this.googleTileset;
     if (stack.requiresIon) return !!this.cesiumToken;
     return true;
   }
@@ -243,7 +257,11 @@ export class MapStackController {
     this._imageryLayer = new Cesium.ImageryLayer(provider);
     this.viewer.imageryLayers.add(this._imageryLayer, 0);
 
-    if (this.googleTileset) this.googleTileset.show = false;
+    // Every globe stack shows the OSM-textured, terrain-shaped globe; only
+    // `hybrid` additionally keeps the Google tileset drawn on top of it (the
+    // photoreal stack shows that same tileset with the globe hidden instead —
+    // see `_activatePhotoreal`).
+    if (this.googleTileset) this.googleTileset.show = stack.kind === 'hybrid';
     this.viewer.scene.globe.show = true;
     await this._setWorldTerrainEnabled(!!this.cesiumToken, gen);
   }
@@ -256,7 +274,11 @@ export class MapStackController {
     let provider;
     if (stack.kind === 'ion') {
       provider = await Cesium.createWorldImageryAsync({ style: stack.style });
-    } else if (stack.kind === 'osm') {
+    } else if (stack.kind === 'osm' || stack.kind === 'hybrid') {
+      // Hybrid reuses the keyless OSM imagery as the terrain globe's texture
+      // — it's the only imagery source guaranteed available with no ion
+      // token, and it only ever shows through in gaps the Google tileset
+      // doesn't cover (open ocean, thin rural coverage).
       provider = new Cesium.OpenStreetMapImageryProvider({
         url: 'https://tile.openstreetmap.org/',
         credit: DEFAULT_OSM_CREDIT,
