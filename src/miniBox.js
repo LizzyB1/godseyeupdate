@@ -1,14 +1,13 @@
 /**
  * @file Generic movable, resizable, collapsible "mini control box" — the
- * same drag/resize/persist mechanics `cameraControls.js` pioneered for its
- * on-screen camera pad, factored out so new small toggleable-controls panels
- * (map overlays, signpost labels) don't each reimplement pointer-drag math,
+ * same drag/resize/persist mechanics originally built for the on-screen
+ * camera pad, factored out so small toggleable-controls panels (camera
+ * controls, map overlays) don't each reimplement pointer-drag math,
  * localStorage geometry persistence, and viewport clamping.
  *
- * `cameraControls.js` itself is left on its own bespoke `buildControlBox` —
- * it already shipped and is well-tested, and refactoring working code onto
- * this shared helper isn't worth the regression risk. This module is for
- * new boxes going forward.
+ * `cameraControls.js`'s `buildControlBox` now builds on this helper too
+ * (via `idPrefix: 'camctl'`), so all of the app's mini control boxes share
+ * one implementation.
  *
  * @module miniBox
  */

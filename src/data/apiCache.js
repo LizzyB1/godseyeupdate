@@ -1,6 +1,5 @@
 /**
  * @file Durable, cross-session client cache for slow-changing API results —
- * OSM Overpass peak/place queries (`data/signpostLabels.js`) and
  * reverse-geocoded addresses (`data/mapOverlays.js`) so far — backed by
  * IndexedDB (`localStorage`'s ~5-10MB cap is far too small for a useful
  * geographic cache). Hard-capped at `MAX_CACHE_BYTES` (5 GB) with FIFO
@@ -15,8 +14,7 @@
  * carry the actual size/eviction accounting and are covered by
  * `apiCache.test.mjs`, mirroring this codebase's split between
  * browser-touching render/data modules and their pure-logic siblings
- * (`contourMath.js`, `gpsTrackParse.js`, `heightInterp.js`,
- * `overpassTiling.js`).
+ * (`contourMath.js`, `gpsTrackParse.js`, `heightInterp.js`).
  *
  * Every public method is best-effort: a missing/broken IndexedDB (older
  * browser, private-mode quota refusal, disabled storage) degrades to a

@@ -51,6 +51,8 @@ const RETRY_MIN_FINITE_FRACTION = 0.6;
 const RETRY_DELAY_MS = 800;
 /** Cache store name (see data/apiCache.js) for reverse-geocode results — addresses for a given point essentially never change. */
 const GEOCODE_CACHE_STORE = 'geocode';
+/** The only vertical-exaggeration multipliers the UI (and this engine) accept — see `setVerticalExaggeration`. */
+const EXAGGERATION_OPTIONS = [1, 1.5, 2];
 
 export const DEFAULT_STATE = Object.freeze({
   contoursEnabled: false,
@@ -108,7 +110,10 @@ export class MapOverlaysEngine {
     this._onCameraMoveEnd = this._onCameraMoveEnd.bind(this);
     this.viewer.camera.moveEnd.addEventListener(this._onCameraMoveEnd);
 
-    this._applyVerticalExaggeration();
+    // Re-run through the setter (not just `_applyVerticalExaggeration`) so a
+    // value restored from an older session's saved state — before the UI was
+    // limited to 1.0×/1.5×/2.0× — gets snapped to the nearest valid option.
+    this.setVerticalExaggeration(this.state.verticalExaggeration);
     if (this.state.contoursEnabled) this._scheduleRecompute();
     if (this.state.gridEnabled) this._recomputeGrid();
   }
@@ -124,9 +129,26 @@ export class MapOverlaysEngine {
   }
 
   // ── vertical exaggeration ───────────────────────────────────────────
+  /**
+   * Sets the terrain height-relief multiplier. Only {@link EXAGGERATION_OPTIONS}
+   * (1.0×, 1.5×, 2.0×) are valid — any other value (including a stale
+   * value restored from an older session's saved state) snaps to whichever
+   * option is numerically closest, so the engine's state can never drift
+   * out of sync with what the UI is able to offer/display.
+   */
   setVerticalExaggeration(value) {
-    const clamped = Cesium.Math.clamp(Number(value) || 1, 1, 10);
-    this.state.verticalExaggeration = clamped;
+    const num = Number(value);
+    const target = Number.isFinite(num) ? num : 1;
+    let snapped = EXAGGERATION_OPTIONS[0];
+    let bestDelta = Infinity;
+    for (const option of EXAGGERATION_OPTIONS) {
+      const delta = Math.abs(option - target);
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        snapped = option;
+      }
+    }
+    this.state.verticalExaggeration = snapped;
     this._applyVerticalExaggeration();
     this._persist();
   }

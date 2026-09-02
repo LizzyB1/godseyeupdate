@@ -37,8 +37,6 @@ import { initGpsTrackPanel } from './gpsTrackPanel.js';
 import { initPanelDragging } from './panelDrag.js';
 import { initMapOverlays } from './data/mapOverlays.js';
 import { initMapOverlayControls } from './mapOverlayControls.js';
-import { initSignpostLabels } from './data/signpostLabels.js';
-import { initSignpostControls } from './signpostControls.js';
 import { resolveApiKey } from './apiKeys.js';
 import { initSettingsDialog, OPACITY_STORAGE_KEY } from './settingsDialog.js';
 import { fetchSessionSettings, createSessionSettingsAutosave } from './sessionSettingsClient.js';
@@ -344,8 +342,9 @@ async function init() {
     // still lets an operator opt back into it.
     setScopeMaskEnabled(false);
 
-    // Keyboard (arrows/WASD look, Q/E roll, R/F zoom) + on-screen pad camera
-    // controls — see src/cameraControls.js.
+    // Keyboard (WASD/arrows ground move, T/G pitch, R/F zoom) + on-screen pad
+    // camera controls — horizon always locked level, no yaw-in-place or roll
+    // — see src/cameraControls.js.
     const cameraControls = initCameraControls(viewer);
 
     // GPS track module loader: load raw NMEA logger dumps or GPX files
@@ -361,12 +360,6 @@ async function init() {
     // src/data/mapOverlays.js (engine) and src/mapOverlayControls.js (box).
     const mapOverlays = initMapOverlays(viewer);
     const mapOverlayControls = initMapOverlayControls(mapOverlays);
-
-    // Peak/place-name "signpost" labels — see src/data/signpostLabels.js
-    // (engine, queries OSM Overpass through the existing /api/overpass
-    // proxy) and src/signpostControls.js (box).
-    const signpostLabels = initSignpostLabels(viewer);
-    const signpostControls = initSignpostControls(signpostLabels);
 
     // GUI overhaul: lets the DISPLAY, DATA LAYERS, CCTV, and SCENES panels be
     // dragged free of their managed stacks — see src/panelDrag.js for why
@@ -463,8 +456,6 @@ async function init() {
       gpsTrackPanel,
       mapOverlays,
       mapOverlayControls,
-      signpostLabels,
-      signpostControls,
       panelDrag,
       getRenderGovernorDiagnostics,
       requestRender: governorRequestRender,

@@ -8,14 +8,16 @@ import { buildMiniBox } from './miniBox.js';
  * "share viewport" screenshot button in its header, since it doesn't
  * warrant a whole panel of its own.
  *
- * Same movable/resizable/persisted-position box mechanics as
- * `cameraControls.js`, factored out into `miniBox.js` so this and
- * `signpostControls.js` don't duplicate that plumbing.
+ * Same movable/resizable/persisted-position/collapsible box mechanics as
+ * `cameraControls.js`, both built on the shared `miniBox.js` helper so
+ * neither reimplements that plumbing.
  *
  * @module mapOverlayControls
  */
 
 const MAJOR_SPACING_OPTIONS = [10, 25, 50, 100, 200, 500];
+/** The only vertical-exaggeration multipliers offered — kept in sync with `data/mapOverlays.js`'s `EXAGGERATION_OPTIONS`. */
+const EXAGGERATION_OPTIONS = [1, 1.5, 2];
 const GRID_SPACING_OPTIONS = [
   { label: '10°', value: 10 },
   { label: '5°', value: 5 },
@@ -116,28 +118,32 @@ export class MapOverlayControls {
     minorEnable.addEventListener('change', () => this.engine.setContourMinorEnabled(minorEnable.checked));
 
     // ── Vertical exaggeration ────────────────────────────────────────
+    // A fixed 3-option button group, not a slider — only 1.0×/1.5×/2.0× are
+    // valid, kept in lockstep with `data/mapOverlays.js`'s own snapping.
     const exagSection = el('div', 'mapovl-section');
     exagSection.appendChild(el('div', 'mapovl-section-title', 'HEIGHT RELIEF EXAGGERATION'));
     const exagRow = el('div', 'mapovl-row');
-    const exagSlider = document.createElement('input');
-    exagSlider.type = 'range';
-    exagSlider.min = '1';
-    exagSlider.max = '10';
-    exagSlider.step = '0.5';
-    exagSlider.value = String(this.engine.state.verticalExaggeration);
-    exagSlider.className = 'mapovl-slider';
-    const exagValue = el('span', 'mapovl-value', `${Number(this.engine.state.verticalExaggeration).toFixed(1)}×`);
-    exagRow.appendChild(exagSlider);
-    exagRow.appendChild(exagValue);
+    const exagButtons = [];
+    const markActiveExaggeration = (v) => {
+      for (const btn of exagButtons) btn.classList.toggle('is-active', Number(btn.dataset.value) === v);
+    };
+    for (const v of EXAGGERATION_OPTIONS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mapovl-btn';
+      btn.dataset.value = String(v);
+      btn.textContent = `${v.toFixed(1)}×`;
+      btn.addEventListener('click', () => {
+        this.engine.setVerticalExaggeration(v);
+        markActiveExaggeration(this.engine.state.verticalExaggeration);
+      });
+      exagButtons.push(btn);
+      exagRow.appendChild(btn);
+    }
+    markActiveExaggeration(this.engine.state.verticalExaggeration);
     exagSection.appendChild(exagRow);
-    exagSection.appendChild(el('div', 'mapovl-hint', 'Makes hills/valleys more obvious — 1× is true scale.'));
+    exagSection.appendChild(el('div', 'mapovl-hint', 'Makes hills/valleys more obvious — 1.0× is true scale.'));
     body.appendChild(exagSection);
-
-    exagSlider.addEventListener('input', () => {
-      const v = Number(exagSlider.value);
-      exagValue.textContent = `${v.toFixed(1)}×`;
-      this.engine.setVerticalExaggeration(v);
-    });
 
     // ── Lat/lon grid ──────────────────────────────────────────────────
     const gridSection = el('div', 'mapovl-section');
@@ -242,8 +248,7 @@ export class MapOverlayControls {
       contourEnable.checked = false;
       intervalSelect.value = String(this.engine.state.contourMajorSpacing);
       minorEnable.checked = false;
-      exagSlider.value = '1';
-      exagValue.textContent = '1.0×';
+      markActiveExaggeration(this.engine.state.verticalExaggeration);
       gridEnable.checked = false;
       gridSpacingSelect.value = String(this.engine.state.gridSpacingDeg);
       gridColorInput.value = this.engine.state.gridColor;

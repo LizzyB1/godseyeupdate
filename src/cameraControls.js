@@ -1,21 +1,26 @@
 import * as Cesium from 'cesium';
+import { buildMiniBox } from './miniBox.js';
+import { computeHorizontalForward, signedRollFromLevel } from './cameraMath.js';
 
 /**
  * Keyboard + mouse + on-screen camera controls, housed in one movable,
- * resizable control box (bottom-left by default).
+ * resizable, collapsible control box (bottom-left by default) built on the
+ * same shared `miniBox.js` mechanics as the Map Overlays panel.
  *
- * WASD (and the arrow keys as a partial alias, see below) translate the
- * camera LATERALLY across the ground: W/Up moves forward, S/Down moves
- * backward, A moves left, D moves right — all four stay in the horizontal
- * plane at constant height/pitch, a pure slide across the surface rather
- * than a dive toward or climb away from it. Left/right strafing (A/D)
- * reuses `camera.moveLeft`/`moveRight`, which already stay horizontal
- * regardless of pitch (they move along the camera's `right` vector, the
- * axis pitch itself rotates around). Forward/backward (W/S) has no
- * built-in Cesium equivalent — pitch-independent forward motion — so it's
- * computed manually each frame from the camera's heading: a horizontal
- * unit vector in the local east-north-up frame at the camera's position
- * (`Cesium.Transforms.eastNorthUpToFixedFrame`), added directly to
+ * WASD (and Up/Down/Left/Right as a partial alias, see below) translate the
+ * camera across the ground: W/Up moves forward, S/Down moves backward, A
+ * moves left, D moves right — all four stay in the horizontal plane at
+ * constant height/pitch, a pure slide across the surface rather than a dive
+ * toward or climb away from it. Left/right strafing (A/D) reuses
+ * `camera.moveLeft`/`moveRight`, which already stay horizontal regardless
+ * of pitch (they move along the camera's `right` vector, the axis pitch
+ * itself rotates around). Forward/backward (W/S/Up/Down) has no built-in
+ * Cesium equivalent — pitch-independent forward motion — so it's computed
+ * manually each frame by flattening the camera's current view direction
+ * onto the local horizontal plane (`cameraMath.js`'s
+ * `computeHorizontalForward`, unit-tested there against real Cesium math so
+ * forward always tracks where the camera is actually facing and never
+ * drifts sideways, whatever the pitch), added directly to
  * `camera.position`, scaled by the same altitude-proportional speed used
  * throughout.
  *
@@ -35,94 +40,95 @@ import * as Cesium from 'cesium';
  * re-pressing an orbit key re-picks the focal point from wherever the
  * camera ends up looking next.
  *
- * Z and C ROTATE THE CAMERA IN PLACE — a simple yaw turn (`camera.lookLeft`
- * /`lookRight`) from a fixed position, distinct from both the 1/3 orbit
- * above (which moves the camera's position around a held ground point)
- * and the Q/E roll below (which twists about the view axis instead of
- * turning left/right).
- *
- * Move speed (lateral translation) scales with current altitude (a
+ * Move speed (ground translation) scales with current altitude (a
  * fraction of camera height per second, floored so it still moves at
  * ground level) — the same scaling R/F zoom already uses for its own
  * forward/backward dolly.
  *
  * Pitch — tilting the view up/down — has its own dedicated pair: T/G
- * (T pitches up, G pitches down). Q/E roll the camera (rotate about the
- * view axis); R/F zoom, which already doubles as forward/backward dolly
- * since lateral (WASD) movement covers ground-plane translation instead.
+ * (T pitches up, G pitches down). R/F zoom, which already doubles as
+ * forward/backward dolly since WASD/arrow movement covers ground-plane
+ * translation instead.
+ *
+ * There is deliberately no yaw-in-place or roll control: the camera's
+ * horizon is always kept level. Every rendered frame, if `camera.roll` has
+ * drifted off level by more than a hair (native Cesium mouse-drag near the
+ * poles is the main source; nothing in this module's own controls
+ * introduces roll in the first place), it's snapped straight back to 0 via
+ * `camera.setView` with the same heading/pitch — `cameraMath.js`'s
+ * `signedRollFromLevel` decides whether a snap is needed. That's the
+ * "always horizontal" guarantee: the horizon can never end up tilted, no
+ * matter what moved the camera.
  *
  * A live orientation readout lives at the top of the control box: a compass
  * needle that swings to the camera's current heading, with a small
- * camera-lens glyph at its tip that banks with roll, plus a text readout of
- * heading/pitch/roll in degrees. It updates on every rendered frame via
- * Cesium's `scene.postRender`, so it stays accurate no matter what moved
- * the camera — keys, the on-screen pad, mouse-drag, or Cesium's own native
- * orbit/pan.
+ * camera-lens glyph at its tip, plus a text readout of heading/pitch/roll
+ * in degrees (roll always reads ~0° now that it's locked level). It updates
+ * on every rendered frame via Cesium's `scene.postRender`, so it stays
+ * accurate no matter what moved the camera — keys, the on-screen pad,
+ * mouse-drag, or Cesium's own native orbit/pan.
  *
- * Mouse: holding the left+right buttons together and dragging vertically
- * pitches (same axis as T/G); holding the right button alone
- * and dragging horizontally rolls (same axis as Q/E). This claims the
- * right mouse button, so Cesium's native right-drag zoom is disabled in
- * favor of it (scroll-wheel zoom, and the R/F keys, still work).
+ * Mouse: holding the right button and dragging vertically pitches (same
+ * axis as T/G). This claims the right mouse button, so Cesium's native
+ * right-drag zoom is disabled in favor of it (scroll-wheel zoom, and the
+ * R/F keys, still work).
  *
- * Opposite-direction cancellation: holding both keys of an axis (lateral
- * forward+backward, lateral left+right, orbit left+right, yaw left+right,
- * or pitch up+down) at once cancels that axis to a stop, exactly like
- * holding neither — there is no extra "which one wins" bookkeeping. The
- * moment one of the two is released, the axis falls through to whichever
- * single key is still held, so movement resumes in that key's direction
- * immediately. For orbit specifically, this also means the held focal
- * point survives a brief overlap (both keys down for one frame) and is
- * only released once BOTH orbit keys are up.
+ * Opposite-direction cancellation: holding both keys of an axis (forward
+ * +backward, left+right, orbit left+right, or pitch up+down) at once
+ * cancels that axis to a stop, exactly like holding neither — there is no
+ * extra "which one wins" bookkeeping. The moment one of the two is
+ * released, the axis falls through to whichever single key is still held,
+ * so movement resumes in that key's direction immediately. For orbit
+ * specifically, this also means the held focal point survives a brief
+ * overlap (both keys down for one frame) and is only released once BOTH
+ * orbit keys are up.
  *
- * The whole control box — grip header, orientation readout, lateral pad,
- * orbit pair, yaw pair, pitch pair, roll/zoom pair, legend, resize handle —
- * is one DOM subtree, so it can be dragged (grip the header) and resized
- * (drag the bottom-right corner) as a unit. Position and size persist to
- * localStorage under the `godsEyeView.camCtlBox.` prefix; double-clicking
- * the header resets both to their defaults.
+ * The whole control box — grip header, collapse toggle, orientation
+ * readout, ground-move pad, orbit pair, pitch pair, zoom pair, legend,
+ * resize handle — is one DOM subtree built by `miniBox.js`, so it can be
+ * dragged (grip the header), collapsed to just its header (the −/+ button),
+ * and resized (drag the bottom-right corner) as a unit. Position and size
+ * persist to localStorage under the `godsEyeView.camCtlBox.` prefix;
+ * double-clicking the header resets both to their defaults.
  */
 
-const MOVE_RATE_PER_S = 0.6; // fraction of current camera height, per second — WASD lateral speed
-const MIN_MOVE_STEP_M = 0.5; // floor so lateral movement still moves at very low altitude
+const MOVE_RATE_PER_S = 0.6; // fraction of current camera height, per second — ground move speed
+const MIN_MOVE_STEP_M = 0.5; // floor so ground movement still moves at very low altitude
 const ORBIT_RATE_RAD_S = Cesium.Math.toRadians(50); // 1/3 orbit-around-focal-point speed
-const YAW_RATE_RAD_S = Cesium.Math.toRadians(50); // Z/C rotate-camera-in-place speed
-const PITCH_RATE_RAD_S = Cesium.Math.toRadians(65); // PageUp/PageDown pitch speed
-const TWIST_RATE_RAD_S = Cesium.Math.toRadians(50); // Q/E roll speed
+const PITCH_RATE_RAD_S = Cesium.Math.toRadians(65); // T/G pitch speed
 const ZOOM_RATE_PER_S = 0.9; // fraction of current camera height, per second
 const MIN_ZOOM_STEP_M = 0.5; // floor so zoom still moves at very low altitude
 const MAX_FRAME_DT_S = 0.1; // clamp dt after a tab is backgrounded/throttled
-const PITCH_DRAG_RAD_PER_PX = Cesium.Math.toRadians(0.15); // L+R drag → pitch
-const ROLL_DRAG_RAD_PER_PX = Cesium.Math.toRadians(0.15); // right-drag → roll
+const PITCH_DRAG_RAD_PER_PX = Cesium.Math.toRadians(0.15); // right-drag → pitch
 const MAX_DRAG_STEP_PX = 60; // clamp a single mousemove delta (e.g. after pointer warp/lag)
+/** Below this much roll deviation, don't bother re-snapping — avoids a setView() call every single frame from float noise. */
+const LEVEL_SNAP_EPSILON_RAD = Cesium.Math.toRadians(0.05);
 
-/** Box drag/resize persistence + bounds. */
+/** Box drag/resize/collapse persistence + bounds — passed straight to `buildMiniBox`. */
 const STORAGE_PREFIX = 'godsEyeView.camCtlBox.';
-const EDGE_INSET = 6;
 const DEFAULT_WIDTH = 176;
-const DEFAULT_HEIGHT = 430;
+const DEFAULT_HEIGHT = 360;
 const MIN_WIDTH = 150;
 const MAX_WIDTH = 360;
-const MIN_HEIGHT = 320;
-const MAX_HEIGHT = 620;
+const MIN_HEIGHT = 260;
+const MAX_HEIGHT = 560;
 
 /** Keys mapped to a held "direction"/"action" name. Arrow keys carry over
  * the subset of the scheme they've always aliased (forward/back, orbit);
- * WASD/1-3/Z-C/QE/RF are keyed by KeyboardEvent.code so layout doesn't matter. */
+ * WASD/1-3/T-G/RF are keyed by KeyboardEvent.code so layout doesn't matter. */
 const KEY_TO_ACTION = {
   ArrowUp: 'lateralForward', ArrowDown: 'lateralBackward', ArrowLeft: 'orbitLeft', ArrowRight: 'orbitRight',
   KeyW: 'lateralForward', KeyS: 'lateralBackward', KeyA: 'lateralLeft', KeyD: 'lateralRight',
   Digit1: 'orbitLeft', Digit3: 'orbitRight',
-  KeyZ: 'yawLeft', KeyC: 'yawRight',
   KeyT: 'pitchUp', KeyG: 'pitchDown',
-  KeyQ: 'rollLeft', KeyE: 'rollRight',
   KeyR: 'zoomIn', KeyF: 'zoomOut',
 };
 
-/** Lateral (ground-plane) translation pad — WASD. All four stay in the
+/** Ground-plane translation pad — WASD/arrows. All four stay in the
  * horizontal plane at constant pitch/height — a pure slide across the
  * surface, not a dive toward or climb away from it. Forward/backward (W/S)
- * follow the camera's heading; left/right (A/D) strafe perpendicular to it. */
+ * follow the camera's current facing direction; left/right (A/D) strafe
+ * perpendicular to it. */
 const LATERAL_BUTTONS = [
   { actions: ['lateralForward'], label: '▲', title: 'Move forward (W / Up)', area: 'up' },
   { actions: ['lateralLeft'], label: '◀', title: 'Move left (A)', area: 'left' },
@@ -138,25 +144,16 @@ const ORBIT_BUTTONS = [
   { actions: ['orbitRight'], label: '↷', title: 'Orbit right around ground point (3 / Right)' },
 ];
 
-/** Yaw pair — Z/C. Rotates the camera in place from a fixed position,
- * distinct from the 1/3 orbit above (which moves the camera around a held
- * ground point) and the Q/E roll below (which twists about the view axis). */
-const YAW_BUTTONS = [
-  { actions: ['yawLeft'], label: '↺', title: 'Rotate camera left in place (Z)' },
-  { actions: ['yawRight'], label: '↻', title: 'Rotate camera right in place (C)' },
-];
-
 /** Dedicated pitch pair. */
 const PITCH_BUTTONS = [
   { actions: ['pitchUp'], label: '▲', title: 'Pitch up (T)' },
   { actions: ['pitchDown'], label: '▼', title: 'Pitch down (G)' },
 ];
 
-const ROLL_ZOOM_BUTTONS = [
-  { actions: ['rollLeft'], label: '⟲', title: 'Roll left (Q)', group: 'rotate' },
-  { actions: ['rollRight'], label: '⟳', title: 'Roll right (E)', group: 'rotate' },
-  { actions: ['zoomOut'], label: '−', title: 'Zoom out (F)', group: 'zoom' },
-  { actions: ['zoomIn'], label: '+', title: 'Zoom in (R)', group: 'zoom' },
+/** Zoom pair — R/F. No yaw-in-place or roll controls exist any more: the horizon is always kept level (see module doc comment). */
+const ZOOM_BUTTONS = [
+  { actions: ['zoomOut'], label: '−', title: 'Zoom out (F)' },
+  { actions: ['zoomIn'], label: '+', title: 'Zoom in (R)' },
 ];
 
 function isEditableTarget(el) {
@@ -171,30 +168,19 @@ function isEditableTarget(el) {
  * module's letters/digits collide with: plain 'f' toggles the data panel,
  * plain 'd' cycles detection mode, plain '1'/'3' switch the sensor style to
  * Normal/Surveillance (StyleManager's `_globalKeydownHandler` in ui.js —
- * its `keyMap` covers '1'-'7', bubble-phase `keydown` on `document`), and
- * plain 'c' both toggles CCTV overlays (same `_globalKeydownHandler`) and
- * enters/exits cockpit view when an aircraft is tracked
- * (`CockpitViewController#onKeyDown`, capture-phase `keydown` on
- * `document`). Those five are suppressed with `stopPropagation()` while
- * claimed as camera keys so holding them doesn't also flicker the legacy
- * toggle, swap styles, or jump into cockpit view mid-orbit/yaw. Every other
- * claimed key (arrows, W/A/S/D, Q/E, R, PageUp/PageDown) is left to bubble
- * normally — several existing widgets (e.g. the Global Context tab row's
- * roving arrow-key navigation, the radio tuner slider) also read arrow keys
- * while focused, and suppressing propagation for those would break that
- * existing keyboard navigation.
+ * its `keyMap` covers '1'-'7', bubble-phase `keydown` on `document`). Those
+ * four are suppressed with `stopPropagation()` while claimed as camera keys
+ * so holding them doesn't also flicker the legacy toggle or swap styles.
+ * ('c' used to need the same treatment for the removed yaw-in-place
+ * control — now that this module doesn't touch 'c' at all, plain 'c' is
+ * free to toggle CCTV overlays / cockpit view as normal.) Every other
+ * claimed key (arrows, W/A/S/D, T, G, R) is left to bubble normally —
+ * several existing widgets (e.g. the Global Context tab row's roving
+ * arrow-key navigation, the radio tuner slider) also read arrow keys while
+ * focused, and suppressing propagation for those would break that existing
+ * keyboard navigation.
  */
-const LEGACY_SHORTCUT_CODES = new Set(['KeyF', 'KeyD', 'Digit1', 'Digit3', 'KeyC']);
-
-/** Clamp a box's top-left so it stays fully on-screen at its current size. */
-function clampBoxToViewport(left, top, width, height) {
-  const maxLeft = Math.max(EDGE_INSET, window.innerWidth - width - EDGE_INSET);
-  const maxTop = Math.max(EDGE_INSET, window.innerHeight - height - EDGE_INSET);
-  return {
-    left: Math.max(EDGE_INSET, Math.min(maxLeft, left)),
-    top: Math.max(EDGE_INSET, Math.min(maxTop, top)),
-  };
-}
+const LEGACY_SHORTCUT_CODES = new Set(['KeyF', 'KeyD', 'Digit1', 'Digit3']);
 
 /** Radians → unsigned compass degrees in [0, 360). */
 function toCompassDeg(rad) {
@@ -218,47 +204,37 @@ function fmtSignedDeg(deg) {
 }
 
 /**
- * Builds the movable/resizable control box (header + orientation readout +
- * move pad + pitch pair + roll/zoom pair + legend + resize handle) and
- * wires pointer press-and-hold to the given callbacks.
+ * Builds the movable/resizable/collapsible control box (header + orientation
+ * readout + ground-move pad + orbit pair + pitch pair + zoom pair + legend)
+ * on top of `miniBox.js`'s shared box mechanics, and wires pointer
+ * press-and-hold to the given callbacks.
  */
 function buildControlBox({ onPress, onRelease }) {
-  const root = document.createElement('div');
-  root.id = 'camctl-pad';
-  root.className = 'camctl-pad';
-  root.setAttribute('role', 'group');
-  root.setAttribute('aria-label', 'Camera lateral move, orbit, rotate, pitch, roll, zoom, and orientation controls');
-
-  // ── Header: drag grip, title, and a compact live heading readout ──────
-  const header = document.createElement('div');
-  header.className = 'camctl-header';
-  header.title = 'Drag to move · double-click to reset position and size';
-
-  const grip = document.createElement('span');
-  grip.className = 'camctl-grip';
-  grip.textContent = '⋮⋮';
-  grip.setAttribute('aria-hidden', 'true');
-  header.appendChild(grip);
-
-  const title = document.createElement('span');
-  title.className = 'camctl-title';
-  title.textContent = 'CAMERA';
-  header.appendChild(title);
-
-  const headingChip = document.createElement('span');
-  headingChip.className = 'camctl-heading-chip';
-  headingChip.textContent = '000°';
-  header.appendChild(headingChip);
-
-  root.appendChild(header);
-
-  // ── Body ────────────────────────────────────────────────────────────
-  const body = document.createElement('div');
-  body.className = 'camctl-body';
-  root.appendChild(body);
+  let headingChip;
+  const miniBox = buildMiniBox({
+    idPrefix: 'camctl',
+    storagePrefix: STORAGE_PREFIX,
+    title: 'CAMERA',
+    ariaLabel: 'Camera ground-move, orbit, pitch, zoom, and orientation controls',
+    defaultWidth: DEFAULT_WIDTH,
+    defaultHeight: DEFAULT_HEIGHT,
+    minWidth: MIN_WIDTH,
+    maxWidth: MAX_WIDTH,
+    minHeight: MIN_HEIGHT,
+    maxHeight: MAX_HEIGHT,
+    anchor: { left: '24px', bottom: 'calc(2vh + 4.5rem)' },
+    onHeaderBuilt: (header) => {
+      headingChip = document.createElement('span');
+      headingChip.className = 'camctl-heading-chip';
+      headingChip.textContent = '000°';
+      header.appendChild(headingChip);
+    },
+  });
+  const body = miniBox.body;
 
   // Orientation: compass ring (static, N-up) + rotating needle tipped with
-  // a camera-lens glyph that banks with roll, plus a text readout.
+  // a camera-lens glyph, plus a text readout. Roll always reads ~0° now
+  // that the horizon is locked level (see module doc comment).
   const orient = document.createElement('div');
   orient.className = 'camctl-orient';
   orient.setAttribute('aria-hidden', 'true');
@@ -392,22 +368,6 @@ function buildControlBox({ onPress, onRelease }) {
   }
   body.appendChild(orbitRow);
 
-  // Yaw pair — rotates the camera in place (fixed position), unlike orbit above.
-  const yawRow = document.createElement('div');
-  yawRow.className = 'camctl-row';
-  yawRow.title = 'Rotate the camera in place, position held fixed (Z/C)';
-  for (const { actions, label, title: btnTitle } of YAW_BUTTONS) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'camctl-btn camctl-row-btn';
-    btn.title = btnTitle;
-    btn.setAttribute('aria-label', btnTitle);
-    btn.textContent = label;
-    bind(btn, actions);
-    yawRow.appendChild(btn);
-  }
-  body.appendChild(yawRow);
-
   // Dedicated pitch pair.
   const pitchRow = document.createElement('div');
   pitchRow.className = 'camctl-row';
@@ -423,194 +383,26 @@ function buildControlBox({ onPress, onRelease }) {
   }
   body.appendChild(pitchRow);
 
-  // Roll + zoom.
-  const aux = document.createElement('div');
-  aux.className = 'camctl-aux';
-  for (const { actions, label, title: btnTitle, group } of ROLL_ZOOM_BUTTONS) {
+  // Zoom pair. No roll/yaw-in-place controls exist any more — see module doc comment.
+  const zoomRow = document.createElement('div');
+  zoomRow.className = 'camctl-aux';
+  for (const { actions, label, title: btnTitle } of ZOOM_BUTTONS) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = `camctl-btn camctl-aux-btn camctl-${group}`;
+    btn.className = 'camctl-btn camctl-aux-btn';
     btn.title = btnTitle;
     btn.setAttribute('aria-label', btnTitle);
     btn.textContent = label;
     bind(btn, actions);
-    aux.appendChild(btn);
+    zoomRow.appendChild(btn);
   }
-  body.appendChild(aux);
+  body.appendChild(zoomRow);
 
   const legend = document.createElement('div');
   legend.className = 'camctl-legend';
-  legend.title = 'WASD/arrows slide across the ground · 1/3/Left/Right orbit a ground point · Z/C rotate in place · T/G pitch · Q/E or right-drag roll · R/F zoom · mouse L+R drag pitch';
-  legend.textContent = 'WASD lateral · 1/3 orbit · Z/C rotate · T/G pitch · Q/E roll · R/F zoom';
+  legend.title = 'WASD/arrows slide across the ground (forward/back relative to where the camera faces) · 1/3/Left/Right orbit a ground point · T/G pitch · R/F zoom · mouse right-drag pitches · horizon is always kept level';
+  legend.textContent = 'WASD/arrows move · 1/3 orbit · T/G pitch · R/F zoom · horizon locked level';
   body.appendChild(legend);
-
-  // ── Resize handle (bottom-right corner) ────────────────────────────
-  const resizeHandle = document.createElement('div');
-  resizeHandle.className = 'camctl-resize-handle';
-  resizeHandle.title = 'Drag to resize';
-  resizeHandle.setAttribute('role', 'separator');
-  resizeHandle.setAttribute('aria-label', 'Resize camera control box');
-  root.appendChild(resizeHandle);
-
-  document.body.appendChild(root);
-
-  // ── Position/size: restore, drag, resize, persist, clamp on window resize ──
-  const posKey = `${STORAGE_PREFIX}pos`;
-  const sizeKey = `${STORAGE_PREFIX}size`;
-
-  function applyDefaultGeometry() {
-    root.style.width = `${DEFAULT_WIDTH}px`;
-    root.style.height = `${DEFAULT_HEIGHT}px`;
-    root.style.left = '24px';
-    root.style.top = 'auto';
-    root.style.bottom = 'calc(2vh + 4.5rem)';
-    root.style.right = 'auto';
-  }
-  applyDefaultGeometry();
-
-  function currentRect() {
-    return root.getBoundingClientRect();
-  }
-
-  function pinToLeftTop() {
-    // Once dragged/resized, the box is positioned by left/top rather than
-    // the default bottom-anchored placement.
-    const rect = currentRect();
-    root.style.top = `${rect.top}px`;
-    root.style.bottom = 'auto';
-    root.style.left = `${rect.left}px`;
-  }
-
-  function savePos() {
-    const rect = currentRect();
-    try {
-      localStorage.setItem(posKey, JSON.stringify({ left: Math.round(rect.left), top: Math.round(rect.top) }));
-    } catch { /* storage unavailable */ }
-  }
-
-  function saveSize() {
-    const rect = currentRect();
-    try {
-      localStorage.setItem(sizeKey, JSON.stringify({ width: Math.round(rect.width), height: Math.round(rect.height) }));
-    } catch { /* storage unavailable */ }
-  }
-
-  function restore() {
-    let sizeRaw;
-    try { sizeRaw = localStorage.getItem(sizeKey); } catch { sizeRaw = null; }
-    if (sizeRaw) {
-      try {
-        const size = JSON.parse(sizeRaw);
-        if (Number.isFinite(size?.width) && Number.isFinite(size?.height)) {
-          root.style.width = `${Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, size.width))}px`;
-          root.style.height = `${Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, size.height))}px`;
-        }
-      } catch { /* ignore malformed */ }
-    }
-
-    let posRaw;
-    try { posRaw = localStorage.getItem(posKey); } catch { posRaw = null; }
-    if (posRaw) {
-      try {
-        const pos = JSON.parse(posRaw);
-        if (Number.isFinite(pos?.left) && Number.isFinite(pos?.top)) {
-          const rect = currentRect();
-          const { left, top } = clampBoxToViewport(pos.left, pos.top, rect.width, rect.height);
-          root.style.left = `${left}px`;
-          root.style.top = `${top}px`;
-          root.style.bottom = 'auto';
-        }
-      } catch { /* ignore malformed */ }
-    }
-  }
-  restore();
-
-  function resetGeometry() {
-    try { localStorage.removeItem(posKey); } catch { /* storage unavailable */ }
-    try { localStorage.removeItem(sizeKey); } catch { /* storage unavailable */ }
-    applyDefaultGeometry();
-  }
-
-  // Drag-to-move via the header.
-  let dragOffsetX = 0;
-  let dragOffsetY = 0;
-  const onDragMove = (event) => {
-    const rect = currentRect();
-    const { left, top } = clampBoxToViewport(event.clientX - dragOffsetX, event.clientY - dragOffsetY, rect.width, rect.height);
-    root.style.left = `${left}px`;
-    root.style.top = `${top}px`;
-  };
-  const onDragUp = () => {
-    window.removeEventListener('pointermove', onDragMove);
-    window.removeEventListener('pointerup', onDragUp);
-    window.removeEventListener('pointercancel', onDragUp);
-    header.classList.remove('is-dragging');
-    savePos();
-  };
-  header.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    const rect = currentRect();
-    dragOffsetX = event.clientX - rect.left;
-    dragOffsetY = event.clientY - rect.top;
-    pinToLeftTop();
-    header.classList.add('is-dragging');
-    window.addEventListener('pointermove', onDragMove);
-    window.addEventListener('pointerup', onDragUp);
-    window.addEventListener('pointercancel', onDragUp);
-  });
-  header.addEventListener('dblclick', (event) => {
-    event.preventDefault();
-    resetGeometry();
-  });
-
-  // Drag-to-resize via the corner handle.
-  let resizeStartX = 0;
-  let resizeStartY = 0;
-  let resizeStartW = 0;
-  let resizeStartH = 0;
-  const onResizeMove = (event) => {
-    const width = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, resizeStartW + (event.clientX - resizeStartX)));
-    const height = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, resizeStartH + (event.clientY - resizeStartY)));
-    root.style.width = `${width}px`;
-    root.style.height = `${height}px`;
-  };
-  const onResizeUp = () => {
-    window.removeEventListener('pointermove', onResizeMove);
-    window.removeEventListener('pointerup', onResizeUp);
-    window.removeEventListener('pointercancel', onResizeUp);
-    resizeHandle.classList.remove('is-active');
-    saveSize();
-    // Resizing can push the bottom/right edge off-screen; pull it back.
-    const rect = currentRect();
-    const { left, top } = clampBoxToViewport(rect.left, rect.top, rect.width, rect.height);
-    root.style.left = `${left}px`;
-    root.style.top = `${top}px`;
-    root.style.bottom = 'auto';
-  };
-  resizeHandle.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    pinToLeftTop();
-    const rect = currentRect();
-    resizeStartX = event.clientX;
-    resizeStartY = event.clientY;
-    resizeStartW = rect.width;
-    resizeStartH = rect.height;
-    resizeHandle.classList.add('is-active');
-    window.addEventListener('pointermove', onResizeMove);
-    window.addEventListener('pointerup', onResizeUp);
-    window.addEventListener('pointercancel', onResizeUp);
-  });
-
-  const onWindowResize = () => {
-    const rect = currentRect();
-    const { left, top } = clampBoxToViewport(rect.left, rect.top, rect.width, rect.height);
-    if (root.style.left) root.style.left = `${left}px`;
-    if (root.style.top && root.style.top !== 'auto') root.style.top = `${top}px`;
-  };
-  window.addEventListener('resize', onWindowResize);
 
   return {
     headingChip,
@@ -622,14 +414,7 @@ function buildControlBox({ onPress, onRelease }) {
     needleEl: needle,
     camGroupEl: camGroup,
     destroy() {
-      window.removeEventListener('resize', onWindowResize);
-      window.removeEventListener('pointermove', onDragMove);
-      window.removeEventListener('pointerup', onDragUp);
-      window.removeEventListener('pointercancel', onDragUp);
-      window.removeEventListener('pointermove', onResizeMove);
-      window.removeEventListener('pointerup', onResizeUp);
-      window.removeEventListener('pointercancel', onResizeUp);
-      root.remove();
+      miniBox.destroy();
     },
   };
 }
@@ -654,7 +439,7 @@ export class CameraControls {
     this._orbitRange = 0;
     this._orbitPitch = 0;
 
-    // Right-button drag state (roll alone, pitch when combined with left).
+    // Right-button drag state (vertical drag pitches).
     this._dragActive = false;
     this._dragPointerId = null;
     this._lastDragX = 0;
@@ -702,12 +487,12 @@ export class CameraControls {
   }
 
   /**
-   * Claim the right mouse button for pitch/roll drag: right-alone drag
-   * (horizontal) rolls, left+right-together drag (vertical) pitches. This
-   * repurposes Cesium's native right-drag zoom, so RIGHT_DRAG is removed
-   * from the controller's zoomEventTypes (wheel/pinch zoom is untouched);
-   * rotate is suspended only while the right button is actually down, so
-   * plain left-drag orbiting is unaffected.
+   * Claim the right mouse button for pitch drag: dragging vertically while
+   * the right button is held pitches, same axis as T/G. This repurposes
+   * Cesium's native right-drag zoom, so RIGHT_DRAG is removed from the
+   * controller's zoomEventTypes (wheel/pinch zoom is untouched); rotate is
+   * suspended only while the right button is actually down, so plain
+   * left-drag orbiting is unaffected.
    */
   _installMouseDrag() {
     const canvas = this.viewer.canvas;
@@ -747,7 +532,6 @@ export class CameraControls {
 
   /** Right button bit (2) of MouseEvent/PointerEvent#buttons. */
   static get _RIGHT_BIT() { return 2; }
-  static get _LEFT_BIT() { return 1; }
 
   _onContextMenu(event) {
     // Only swallow the native menu when the right button was actually doing
@@ -772,28 +556,20 @@ export class CameraControls {
     if (!this._dragActive || event.pointerId !== this._dragPointerId) return;
     const rightDown = (event.buttons & CameraControls._RIGHT_BIT) !== 0;
     if (!rightDown) { this._endDrag(event); return; }
-    const leftDown = (event.buttons & CameraControls._LEFT_BIT) !== 0;
 
-    const dx = Cesium.Math.clamp(event.clientX - this._lastDragX, -MAX_DRAG_STEP_PX, MAX_DRAG_STEP_PX);
     const dy = Cesium.Math.clamp(event.clientY - this._lastDragY, -MAX_DRAG_STEP_PX, MAX_DRAG_STEP_PX);
     this._lastDragX = event.clientX;
     this._lastDragY = event.clientY;
 
-    const camera = this.viewer.camera;
-    if (leftDown) {
-      // Both buttons: vertical drag pitches (Y-axis tilt) — up = pitch up,
-      // matching the same convention as PageUp/1 and non-inverted FPS-style
-      // mouselook.
-      if (dy !== 0) {
-        const step = Math.abs(dy) * PITCH_DRAG_RAD_PER_PX;
-        if (dy < 0) camera.lookUp(step);
-        else camera.lookDown(step);
-      }
-    } else if (dx !== 0) {
-      // Right alone: horizontal drag rolls.
-      const step = Math.abs(dx) * ROLL_DRAG_RAD_PER_PX;
-      if (dx > 0) camera.twistRight(step);
-      else camera.twistLeft(step);
+    // Vertical drag pitches (Y-axis tilt) — up = pitch up, matching the
+    // same convention as T and non-inverted FPS-style mouselook. There's no
+    // roll gesture any more (see module doc comment), so horizontal drag is
+    // simply ignored.
+    if (dy !== 0) {
+      const camera = this.viewer.camera;
+      const step = Math.abs(dy) * PITCH_DRAG_RAD_PER_PX;
+      if (dy < 0) camera.lookUp(step);
+      else camera.lookDown(step);
     }
   }
 
@@ -816,9 +592,9 @@ export class CameraControls {
     const action = KEY_TO_ACTION[event.code];
     if (!action) return;
     event.preventDefault();
-    // Only the two keys with a confirmed pre-existing conflict are stopped
+    // Only the keys with a confirmed pre-existing conflict are stopped
     // from bubbling — see LEGACY_SHORTCUT_CODES. Everything else (arrows,
-    // W/A/S, Q/E, R, PageUp/PageDown) still reaches any element-specific handler.
+    // WASD, T, G, R) still reaches any element-specific handler.
     if (LEGACY_SHORTCUT_CODES.has(event.code)) event.stopPropagation();
     this._held.add(action);
     this._ensureLoop();
@@ -841,25 +617,22 @@ export class CameraControls {
 
   /**
    * A horizontal (pitch-independent) unit vector, in world space, pointing
-   * in the direction the camera is currently facing (its heading) — used
-   * for W/S forward/backward translation, which (unlike A/D strafing) has
-   * no built-in Cesium equivalent since `moveForward`/`moveBackward` follow
-   * `camera.direction`, which tilts with pitch. Built from the local
-   * east-north-up frame at the camera's position: heading 0 (north) maps to
-   * local (east=0, north=1, up=0), heading 90° (east) to (1, 0, 0), matching
-   * Cesium's clockwise-from-north heading convention.
-   * @returns {?Cesium.Cartesian3} null only if the camera has no valid position yet.
+   * in the direction the camera is currently facing — used for W/S/Up/Down
+   * forward/backward translation, which (unlike A/D strafing) has no
+   * built-in Cesium equivalent since `moveForward`/`moveBackward` follow
+   * `camera.direction`, which tilts with pitch. Delegates to
+   * `cameraMath.js`'s `computeHorizontalForward`, which flattens
+   * `camera.direction` onto the local horizontal plane directly (rather
+   * than reconstructing a vector from `camera.heading`) and is
+   * unit-tested there against real Cesium math for exactly the failure
+   * this exists to rule out: forward drifting sideways under pitch.
+   * @returns {?Cesium.Cartesian3} null only if the camera has no valid position/direction yet, or is looking (near-)straight up/down.
    */
   _computeHorizontalForward() {
     const camera = this.viewer.camera;
     if (!camera?.positionWC) return null;
     const ellipsoid = this.viewer.scene?.globe?.ellipsoid || Cesium.Ellipsoid.WGS84;
-    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(camera.positionWC, ellipsoid);
-    const local = new Cesium.Cartesian3(Math.sin(camera.heading), Math.cos(camera.heading), 0);
-    const world = Cesium.Matrix4.multiplyByPointAsVector(enu, local, new Cesium.Cartesian3());
-    const length = Cesium.Cartesian3.magnitude(world);
-    if (!(length > 0)) return null;
-    return Cesium.Cartesian3.divideByScalar(world, length, world);
+    return computeHorizontalForward(camera.positionWC, camera.directionWC, ellipsoid);
   }
 
   /**
@@ -901,15 +674,30 @@ export class CameraControls {
   }
 
   /**
+   * If the camera's roll has drifted off level, snaps it straight back to 0
+   * (same heading/pitch, roll forced to 0) — the "always horizontal"
+   * guarantee described in the module doc comment. Runs every rendered
+   * frame regardless of what moved the camera, so it catches drift from
+   * Cesium's own native mouse-drag as well as anything in this module.
+   */
+  _enforceLevelHorizon(camera) {
+    const rollDelta = signedRollFromLevel(camera.roll);
+    if (Math.abs(rollDelta) < LEVEL_SNAP_EPSILON_RAD) return;
+    camera.setView({ orientation: { heading: camera.heading, pitch: camera.pitch, roll: 0 } });
+  }
+
+  /**
    * Reads the camera's current heading/pitch/roll and updates the
    * orientation compass + text readout. Cheap DOM/CSS-transform writes
    * only — safe to run on every `postRender`.
    */
   _updateOrientation() {
-    const box = this._box;
-    if (!box) return;
     const camera = this.viewer.camera;
     if (!camera) return;
+    this._enforceLevelHorizon(camera);
+
+    const box = this._box;
+    if (!box) return;
 
     const headingDeg = toCompassDeg(camera.heading);
     const pitchDeg = toSignedDeg(camera.pitch);
@@ -1016,18 +804,6 @@ export class CameraControls {
       this._orbitFocus = null;
     }
 
-    // Rotate the camera in place (fixed position) — a plain yaw turn, unlike
-    // the orbit above which moves the camera's position around a held
-    // ground point. `lookLeft`/`lookRight` rotate about the camera's own up
-    // vector without touching `camera.position`.
-    const yawDir = (active.has('yawRight') ? 1 : 0) - (active.has('yawLeft') ? 1 : 0);
-    if (yawDir > 0) camera.lookRight(YAW_RATE_RAD_S * dt);
-    else if (yawDir < 0) camera.lookLeft(YAW_RATE_RAD_S * dt);
-
-    const rollDir = (active.has('rollRight') ? 1 : 0) - (active.has('rollLeft') ? 1 : 0);
-    if (rollDir > 0) camera.twistRight(TWIST_RATE_RAD_S * dt);
-    else if (rollDir < 0) camera.twistLeft(TWIST_RATE_RAD_S * dt);
-
     const zoomDir = (active.has('zoomIn') ? 1 : 0) - (active.has('zoomOut') ? 1 : 0);
     if (zoomDir !== 0) {
       const height = camera.positionCartographic?.height;
@@ -1052,7 +828,7 @@ export class CameraControls {
 }
 
 /**
- * Install keyboard + on-screen camera strafe/pitch/roll/zoom controls.
+ * Install keyboard + on-screen camera ground-move/orbit/pitch/zoom controls.
  * @param {Cesium.Viewer} viewer
  * @returns {CameraControls}
  */

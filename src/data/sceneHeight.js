@@ -9,8 +9,7 @@ import * as Cesium from 'cesium';
  * terrain provider or a file's own recorded elevation field — those can
  * (and, per field testing, do) disagree with the visible tileset surface
  * by a meaningful margin. That mismatch was the root cause of elevation
- * contours and GPS tracks appearing off the rendered ground, and of OSM
- * signpost labels not reliably showing up at all.
+ * contours and GPS tracks appearing off the rendered ground.
  *
  * Mirrors the synchronous, already-loaded-tiles-only sampling
  * `data/traffic.js` already uses for road base heights
