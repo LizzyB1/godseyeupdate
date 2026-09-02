@@ -2,8 +2,9 @@ import { buildMiniBox } from './miniBox.js';
 
 /**
  * @file "Map Overlays" mini control box: elevation contours, vertical
- * (height-relief) exaggeration, and a lat/lon graticule — everything driven
- * by `src/data/mapOverlays.js`'s `MapOverlaysEngine`. Also carries the
+ * (height-relief) exaggeration, a lat/lon graticule, and a combined toggle
+ * for large on-screen value labels on both — everything driven by
+ * `src/data/mapOverlays.js`'s `MapOverlaysEngine`. Also carries the
  * "share viewport" screenshot button in its header, since it doesn't
  * warrant a whole panel of its own.
  *
@@ -187,6 +188,26 @@ export class MapOverlayControls {
     gridSpacingSelect.addEventListener('change', () => this.engine.setGridSpacingDeg(Number(gridSpacingSelect.value)));
     gridColorInput.addEventListener('input', () => this.engine.setGridColor(gridColorInput.value));
 
+    // ── Line value labels ────────────────────────────────────────────
+    // One combined toggle for both overlays above: when on, every grid
+    // line currently drawn gets its lat/long, and every major contour
+    // line gets its height, in large on-screen text — only for lines
+    // already computed for the current viewport, so this never needs its
+    // own visible-viewport filtering (see mapOverlays.js).
+    const labelSection = el('div', 'mapovl-section');
+    labelSection.appendChild(el('div', 'mapovl-section-title', 'LINE LABELS'));
+    const labelRow = el('label', 'mapovl-row');
+    const labelEnable = document.createElement('input');
+    labelEnable.type = 'checkbox';
+    labelEnable.checked = this.engine.state.lineLabelsEnabled;
+    labelRow.appendChild(labelEnable);
+    labelRow.appendChild(document.createTextNode('Show grid/contour value labels'));
+    labelSection.appendChild(labelRow);
+    labelSection.appendChild(el('div', 'mapovl-hint', 'Large lat/long labels on grid lines, height labels on major contour lines.'));
+    body.appendChild(labelSection);
+
+    labelEnable.addEventListener('change', () => this.engine.setLineLabelsEnabled(labelEnable.checked));
+
     // ── Reset ─────────────────────────────────────────────────────────
     const resetBtn = document.createElement('button');
     resetBtn.type = 'button';
@@ -201,6 +222,7 @@ export class MapOverlayControls {
       gridEnable.checked = false;
       gridSpacingSelect.value = String(this.engine.state.gridSpacingDeg);
       gridColorInput.value = this.engine.state.gridColor;
+      labelEnable.checked = false;
       this._setContourStatus('');
     });
     body.appendChild(resetBtn);

@@ -1,6 +1,6 @@
 import * as Cesium from 'cesium';
 import { marchingSquaresSegments, gridToLonLat } from './contourMath.js';
-import { formatLatLonDMS, formatLatLonDecimal, googleMapsLink, formatHeight } from './coordFormat.js';
+import { formatLatLonDMS, formatLatLonDecimal, googleMapsLink, formatHeight, toDMS } from './coordFormat.js';
 import { resolveApiKey } from '../apiKeys.js';
 import { sampleSceneHeights } from './sceneHeight.js';
 import { getSharedCache } from './apiCache.js';
@@ -64,7 +64,18 @@ export const DEFAULT_STATE = Object.freeze({
   gridSpacingDeg: 1,
   gridColor: '#00d4ff',
   gridMinorColor: '#3a5a66',
+  // Large-text value labels on whichever grid/contour lines are currently
+  // shown — lat/long for grid lines, height for (major) contour lines.
+  // Only ever drawn for lines already computed for the current viewport
+  // (see `_recomputeGrid`/`_recomputeContours`), so there's nothing extra
+  // to cull: on screen == in the visible viewport, by construction.
+  lineLabelsEnabled: false,
 });
+
+/** Font for grid/contour line value labels — deliberately large, per the
+ * feature's own purpose: readable at a glance, not a fine-print readout
+ * like the rest of the HUD. */
+const LINE_LABEL_FONT = '700 20px sans-serif';
 
 function loadState() {
   try {
@@ -90,6 +101,8 @@ export class MapOverlaysEngine {
 
     this._contourPrimitive = null;
     this._gridPrimitive = null;
+    this._contourLabelPrimitive = null;
+    this._gridLabelPrimitive = null;
     this._recomputeTimer = null;
     this._contourStatus = ''; // status line shown in the UI
     this._computeToken = 0;
@@ -186,11 +199,47 @@ export class MapOverlaysEngine {
     if (this.state.contoursEnabled && this.state.contourMinorEnabled) this._scheduleRecompute();
   }
 
+  // ── line value labels (grid + contour, shared toggle) ────────────────
+  /**
+   * Large-text value labels on whichever grid/contour lines are currently
+   * on screen: each grid line gets its lat or long, each major contour
+   * line gets its height. One combined toggle for both, since they're the
+   * same idea (label the line with the value it represents) applied to
+   * two different overlay types.
+   */
+  setLineLabelsEnabled(enabled) {
+    this.state.lineLabelsEnabled = Boolean(enabled);
+    this._persist();
+    // Labels ride along with each feature's own recompute (grid's is
+    // synchronous, contours' goes through the debounced scheduler) so the
+    // add-or-clear decision only has to live in one place per feature —
+    // see the `this.state.lineLabelsEnabled` checks in `_recomputeGrid`
+    // and `_recomputeContours`. Neither call does anything if its own
+    // feature (grid/contours) isn't enabled, matching the existing pattern.
+    if (this.state.gridEnabled) this._recomputeGrid();
+    if (this.state.contoursEnabled) this._scheduleRecompute();
+  }
+
+  _clearContourLabels() {
+    if (this._contourLabelPrimitive) {
+      this.viewer.scene.primitives.remove(this._contourLabelPrimitive);
+      this._contourLabelPrimitive = null;
+    }
+  }
+
+  _clearGridLabels() {
+    if (this._gridLabelPrimitive) {
+      this.viewer.scene.primitives.remove(this._gridLabelPrimitive);
+      this._gridLabelPrimitive = null;
+    }
+  }
+
   _clearContours() {
     if (this._contourPrimitive) {
       this.viewer.scene.primitives.remove(this._contourPrimitive);
       this._contourPrimitive = null;
     }
+    this._clearContourLabels();
     this._setStatus('');
   }
 
@@ -266,6 +315,14 @@ export class MapOverlaysEngine {
     const majorColor = Cesium.Color.fromCssColorString('#ffd60a').withAlpha(0.85);
     const minorColor = Cesium.Color.fromCssColorString('#ffd60a').withAlpha(0.35);
 
+    // For each major level, remember the segment midpoint closest to the
+    // view center — that's where its value label goes (if labels are on),
+    // one per level rather than one per segment so a level with many
+    // crossings doesn't spam the screen with repeated labels.
+    const centerLon = (west + east) / 2;
+    const centerLat = (south + north) / 2;
+    const bestLabelSpotByLevel = new Map();
+
     const newPrimitive = new Cesium.PolylineCollection();
     let segmentCount = 0;
     for (const { height, major: isMajor } of levels) {
@@ -282,6 +339,16 @@ export class MapOverlaysEngine {
           material: Cesium.Material.fromType('Color', { color: isMajor ? majorColor : minorColor }),
         });
         segmentCount += 1;
+
+        if (isMajor) {
+          const midLon = (aLL.lon + bLL.lon) / 2;
+          const midLat = (aLL.lat + bLL.lat) / 2;
+          const distSq = (midLon - centerLon) ** 2 + (midLat - centerLat) ** 2;
+          const existing = bestLabelSpotByLevel.get(height);
+          if (!existing || distSq < existing.distSq) {
+            bestLabelSpotByLevel.set(height, { distSq, lon: midLon, lat: midLat });
+          }
+        }
       }
     }
 
@@ -290,6 +357,23 @@ export class MapOverlaysEngine {
     if (segmentCount > 0) {
       this._contourPrimitive = this.viewer.scene.primitives.add(newPrimitive);
       this._setStatus(`${levels.length} level${levels.length === 1 ? '' : 's'}, ${segmentCount} segments (${Math.round(minH)}–${Math.round(maxH)} m relief).`);
+      if (this.state.lineLabelsEnabled) {
+        const labelPrimitive = new Cesium.LabelCollection();
+        for (const [height, spot] of bestLabelSpotByLevel) {
+          labelPrimitive.add({
+            position: Cesium.Cartesian3.fromDegrees(spot.lon, spot.lat, height),
+            text: formatHeight(height),
+            font: LINE_LABEL_FONT,
+            fillColor: majorColor,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 4,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          });
+        }
+        this._contourLabelPrimitive = this.viewer.scene.primitives.add(labelPrimitive);
+      }
     } else {
       newPrimitive.destroy();
       this._setStatus(`Flat here — ${Math.round(minH)}–${Math.round(maxH)} m relief, no contour crossing.`);
@@ -322,6 +406,7 @@ export class MapOverlaysEngine {
       this.viewer.scene.primitives.remove(this._gridPrimitive);
       this._gridPrimitive = null;
     }
+    this._clearGridLabels();
   }
 
   _recomputeGrid() {
@@ -374,6 +459,43 @@ export class MapOverlaysEngine {
 
     this._clearGrid();
     this._gridPrimitive = this.viewer.scene.primitives.add(newPrimitive);
+
+    if (this.state.lineLabelsEnabled) {
+      // One label per line, placed at its midpoint through the current
+      // viewport — a meridian's label sits at the view's vertical center,
+      // a parallel's at the horizontal center, so labels spread out along
+      // the middle of the screen rather than piling up at an edge.
+      const midLat = (south + north) / 2;
+      const midLon = (west + east) / 2;
+      const labelPrimitive = new Cesium.LabelCollection();
+      for (const lon of thinnedMeridians) {
+        labelPrimitive.add({
+          position: Cesium.Cartesian3.fromDegrees(lon, midLat, 0),
+          text: toDMS(lon, false),
+          font: LINE_LABEL_FONT,
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 4,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        });
+      }
+      for (const lat of thinnedParallels) {
+        labelPrimitive.add({
+          position: Cesium.Cartesian3.fromDegrees(midLon, lat, 0),
+          text: toDMS(lat, true),
+          font: LINE_LABEL_FONT,
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 4,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        });
+      }
+      this._gridLabelPrimitive = this.viewer.scene.primitives.add(labelPrimitive);
+    }
   }
 
   _onCameraMoveEnd() {
