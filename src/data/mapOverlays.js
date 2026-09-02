@@ -386,6 +386,12 @@ export class MapOverlaysEngine {
     this._cursorActive = Boolean(active);
     if (this._cursorActive) this._installCursorHandler();
     else this._uninstallCursorHandler();
+    // Fire onCursorChange on activation flips too (not just on a new pin),
+    // so a UI subscribing to it — e.g. coordinatesBox.js's toggle button —
+    // can stay in sync even when active state changes from elsewhere (for
+    // instance MapOverlaysEngine#reset(), called from a separate box now
+    // that the coordinate tool has its own).
+    this.onCursorChange?.(this._cursorData);
   }
 
   isCursorActive() {

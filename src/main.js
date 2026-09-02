@@ -36,6 +36,7 @@ import { initGpsTrackPanel } from './gpsTrackPanel.js';
 import { initPanelDragging } from './panelDrag.js';
 import { initMapOverlays } from './data/mapOverlays.js';
 import { initMapOverlayControls } from './mapOverlayControls.js';
+import { initCoordinatesBox } from './coordinatesBox.js';
 import { resolveApiKey } from './apiKeys.js';
 import { initSettingsDialog, OPACITY_STORAGE_KEY } from './settingsDialog.js';
 import { fetchSessionSettings, createSessionSettingsAutosave } from './sessionSettingsClient.js';
@@ -345,10 +346,13 @@ async function init() {
     const gpsTrackPanel = initGpsTrackPanel(gpsTrackOverlay);
 
     // Map overlays: elevation contours, vertical exaggeration, lat/long
-    // grid, and the coordinate cursor/screenshot tool — see
-    // src/data/mapOverlays.js (engine) and src/mapOverlayControls.js (box).
+    // grid, and the screenshot tool — see src/data/mapOverlays.js (engine)
+    // and src/mapOverlayControls.js (box). The coordinate cursor/pin tool
+    // is its own separately movable/resizable/hidable box on the same
+    // engine — see src/coordinatesBox.js.
     const mapOverlays = initMapOverlays(viewer);
     const mapOverlayControls = initMapOverlayControls(mapOverlays);
+    const coordinatesBox = initCoordinatesBox(mapOverlays);
 
     // GUI overhaul: lets the DISPLAY, DATA LAYERS, CCTV, and SCENES panels be
     // dragged free of their managed stacks — see src/panelDrag.js for why
@@ -445,6 +449,7 @@ async function init() {
       gpsTrackPanel,
       mapOverlays,
       mapOverlayControls,
+      coordinatesBox,
       panelDrag,
       getRenderGovernorDiagnostics,
       requestRender: governorRequestRender,

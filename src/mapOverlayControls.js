@@ -2,11 +2,15 @@ import { buildMiniBox } from './miniBox.js';
 
 /**
  * @file "Map Overlays" mini control box: elevation contours, vertical
- * (height-relief) exaggeration, a lat/lon graticule, and the coordinate
- * cursor/pin tool with its copyable output box — everything driven by
- * `src/data/mapOverlays.js`'s `MapOverlaysEngine`. Also carries the
+ * (height-relief) exaggeration, and a lat/lon graticule — everything driven
+ * by `src/data/mapOverlays.js`'s `MapOverlaysEngine`. Also carries the
  * "share viewport" screenshot button in its header, since it doesn't
  * warrant a whole panel of its own.
+ *
+ * The coordinate cursor/pin tool used to live in this same box; it's now
+ * its own standalone, independently movable/resizable/hidable box — see
+ * `coordinatesBox.js` — so it can be positioned and collapsed separately
+ * from the rest of Map Overlays.
  *
  * Same movable/resizable/persisted-position/collapsible box mechanics as
  * `cameraControls.js`, both built on the shared `miniBox.js` helper so
@@ -40,8 +44,6 @@ export class MapOverlayControls {
     this.engine = engine;
     this._build();
     this.engine.onStatusChange = (text) => this._setContourStatus(text);
-    this.engine.onCursorChange = () => this._refreshCoordBox();
-    this._refreshCoordBox();
   }
 
   _build() {
@@ -49,7 +51,7 @@ export class MapOverlayControls {
       idPrefix: 'mapovl',
       storagePrefix: 'godsEyeView.mapOverlayBox.',
       title: 'MAP OVERLAYS',
-      ariaLabel: 'Map overlay controls: contours, height exaggeration, coordinate grid, and cursor tool',
+      ariaLabel: 'Map overlay controls: contours, height exaggeration, and coordinate grid',
       defaultWidth: 268,
       defaultHeight: 560,
       minWidth: 220,
@@ -185,59 +187,6 @@ export class MapOverlayControls {
     gridSpacingSelect.addEventListener('change', () => this.engine.setGridSpacingDeg(Number(gridSpacingSelect.value)));
     gridColorInput.addEventListener('input', () => this.engine.setGridColor(gridColorInput.value));
 
-    // ── Coordinates / cursor tool ───────────────────────────────────────
-    const coordSection = el('div', 'mapovl-section');
-    coordSection.appendChild(el('div', 'mapovl-section-title', 'COORDINATES'));
-
-    const cursorRow = el('div', 'mapovl-row');
-    const cursorToggle = document.createElement('button');
-    cursorToggle.type = 'button';
-    cursorToggle.className = 'mapovl-btn';
-    cursorToggle.textContent = '📍 Place cursor';
-    cursorToggle.title = 'Click the map to drop/move a coordinate cursor';
-    const clearBtn = document.createElement('button');
-    clearBtn.type = 'button';
-    clearBtn.className = 'mapovl-btn';
-    clearBtn.textContent = 'Clear pin';
-    cursorRow.appendChild(cursorToggle);
-    cursorRow.appendChild(clearBtn);
-    coordSection.appendChild(cursorRow);
-
-    const output = el('div', 'mapovl-output');
-    const outLat = el('div', 'mapovl-output-row');
-    const outHeight = el('div', 'mapovl-output-row');
-    const outAddr = el('div', 'mapovl-output-row');
-    const outLink = el('div', 'mapovl-output-row');
-    output.appendChild(outLat);
-    output.appendChild(outHeight);
-    output.appendChild(outAddr);
-    output.appendChild(outLink);
-    coordSection.appendChild(output);
-    this._outLat = outLat;
-    this._outHeight = outHeight;
-    this._outAddr = outAddr;
-    this._outLink = outLink;
-
-    const copyBtn = document.createElement('button');
-    copyBtn.type = 'button';
-    copyBtn.className = 'mapovl-btn mapovl-copy-btn';
-    copyBtn.textContent = 'Copy coordinates';
-    coordSection.appendChild(copyBtn);
-    this._copyBtn = copyBtn;
-    body.appendChild(coordSection);
-
-    cursorToggle.addEventListener('click', () => {
-      const nowActive = !this.engine.isCursorActive();
-      this.engine.setCursorActive(nowActive);
-      cursorToggle.classList.toggle('is-active', nowActive);
-      cursorToggle.textContent = nowActive ? '📍 Cursor active — click map' : '📍 Place cursor';
-    });
-    clearBtn.addEventListener('click', () => {
-      this.engine.clearCursor();
-      this._refreshCoordBox();
-    });
-    copyBtn.addEventListener('click', () => this._copyCoordinates());
-
     // ── Reset ─────────────────────────────────────────────────────────
     const resetBtn = document.createElement('button');
     resetBtn.type = 'button';
@@ -252,59 +201,13 @@ export class MapOverlayControls {
       gridEnable.checked = false;
       gridSpacingSelect.value = String(this.engine.state.gridSpacingDeg);
       gridColorInput.value = this.engine.state.gridColor;
-      cursorToggle.classList.remove('is-active');
-      cursorToggle.textContent = '📍 Place cursor';
       this._setContourStatus('');
-      this._refreshCoordBox();
     });
     body.appendChild(resetBtn);
   }
 
   _setContourStatus(text) {
     if (this._contourStatus) this._contourStatus.textContent = text || '';
-  }
-
-  _refreshCoordBox() {
-    const out = this.engine.getCursorOutput() || this.engine.getCameraOutput();
-    if (!out) {
-      this._outLat.textContent = 'No position yet.';
-      this._outHeight.textContent = '';
-      this._outAddr.textContent = '';
-      this._outLink.textContent = '';
-      return;
-    }
-    this._outLat.textContent = `${out.dms}  (${out.decimal})`;
-    this._outHeight.textContent = out.height ? `Height: ${out.height}` : '';
-    this._outAddr.textContent = out.address ? `Address: ${out.address}` : '';
-    if (out.mapsLink) {
-      this._outLink.innerHTML = '';
-      const a = document.createElement('a');
-      a.href = out.mapsLink;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.textContent = 'Open in Google Maps ↗';
-      this._outLink.appendChild(a);
-    } else {
-      this._outLink.textContent = '';
-    }
-  }
-
-  async _copyCoordinates() {
-    const out = this.engine.getCursorOutput() || this.engine.getCameraOutput();
-    if (!out) return;
-    const lines = [out.dms, out.decimal];
-    if (out.height) lines.push(out.height);
-    if (out.address) lines.push(out.address);
-    if (out.mapsLink) lines.push(out.mapsLink);
-    const text = lines.join('\n');
-    try {
-      await navigator.clipboard.writeText(text);
-      const original = this._copyBtn.textContent;
-      this._copyBtn.textContent = 'Copied!';
-      setTimeout(() => { this._copyBtn.textContent = original; }, 1200);
-    } catch {
-      this._setContourStatus('Clipboard unavailable — select and copy manually.');
-    }
   }
 
   destroy() {
