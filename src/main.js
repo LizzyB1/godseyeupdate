@@ -38,6 +38,8 @@ import { initMapOverlays } from './data/mapOverlays.js';
 import { initMapOverlayControls } from './mapOverlayControls.js';
 import { initCoordinatesBox } from './coordinatesBox.js';
 import { initPanelRestoreTray } from './panelRestoreTray.js';
+import { initBathymetry } from './data/bathymetry.js';
+import { initBathymetryBox } from './bathymetryBox.js';
 import { resolveApiKey } from './apiKeys.js';
 import { initSettingsDialog, OPACITY_STORAGE_KEY } from './settingsDialog.js';
 import { fetchSessionSettings, createSessionSettingsAutosave } from './sessionSettingsClient.js';
@@ -355,6 +357,13 @@ async function init() {
     const mapOverlayControls = initMapOverlayControls(mapOverlays);
     const coordinatesBox = initCoordinatesBox(mapOverlays);
 
+    // Bathymetry: undersea depth contours (NOAA) and depth markers (GEBCO
+    // via opentopodata.org) — both free, no API key. Self-contained, its
+    // own engine/box pair mirroring mapOverlays/mapOverlayControls above —
+    // see src/data/bathymetry.js and src/bathymetryBox.js.
+    const bathymetry = initBathymetry(viewer);
+    const bathymetryBox = initBathymetryBox(bathymetry);
+
     // Restore tray for any of the 6 major panels' new "×" hide button — see
     // src/panelVisibility.js (the registry) and src/panelRestoreTray.js
     // (this box).
@@ -458,6 +467,8 @@ async function init() {
       mapOverlays,
       mapOverlayControls,
       coordinatesBox,
+      bathymetry,
+      bathymetryBox,
       panelRestoreTray,
       panelDrag,
       getRenderGovernorDiagnostics,

@@ -201,6 +201,26 @@ export const NATURAL_EARTH_CREDIT = {
     '<a href="https://www.naturalearthdata.com" target="_blank" rel="noopener">Natural Earth</a> (public domain)',
 };
 
+/** Registered the moment the Bathymetry box's "Show depth contours" toggle
+ * activates (`data/bathymetry.js`) — off by default, so this stays
+ * conditional rather than always-on, same pattern as `TOMTOM_CREDIT`. */
+export const NOAA_BATHYMETRY_CREDIT = {
+  key: 'noaa-bathymetric-contours',
+  html:
+    'Undersea depth contours: NOAA — ' +
+    '<a href="https://coast.noaa.gov/arcgis/rest/services/OceanReports/BathymetricContours/MapServer" target="_blank" rel="noopener">OceanReports Bathymetric Contours</a>',
+};
+
+/** Registered the moment the Bathymetry box's "Show depth markers" toggle
+ * activates (`data/bathymetry.js`). */
+export const GEBCO_DEPTH_CREDIT = {
+  key: 'gebco-opentopodata',
+  html:
+    'Depth markers: GEBCO 2020 grid via ' +
+    '<a href="https://www.opentopodata.org" target="_blank" rel="noopener">Open Topo Data</a> ' +
+    '(<a href="https://www.gebco.net" target="_blank" rel="noopener">gebco.net</a>, public domain)',
+};
+
 /** @type {Set<string>} Keys of dynamic credits already registered this session. */
 const _dynamicCreditKeys = new Set();
 

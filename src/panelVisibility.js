@@ -29,6 +29,7 @@ export const PANEL_LABELS = {
   'data-panel': 'Data Layers',
   'control-panel': 'Visual Presets',
   'location-bar': 'Location',
+  'bathy-pad': 'Bathymetry',
 };
 
 function loadHidden() {

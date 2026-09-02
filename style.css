@@ -10463,6 +10463,117 @@ body.scene-playback-mode #first-run-launcher {
 }
 .restoretray-btn:hover { color: var(--text-primary); border-color: var(--accent); }
 
+/* ── Bathymetry: standalone mini-box chrome (src/bathymetryBox.js) ───────
+   Undersea depth contour + depth marker toggles. Reuses the `.mapovl-*`
+   content classes (section/row/hint/status) verbatim — see
+   coordinatesBox.js's file doc comment for why that's safe — so only the
+   idPrefix-scoped chrome and its own close button need defining here. */
+.bathy-pad {
+  position: fixed;
+  z-index: 146;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--btn-radius);
+  background: var(--glass-bg);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.bathy-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.35);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.bathy-header.is-dragging { cursor: grabbing; }
+.bathy-grip {
+  flex: 0 0 auto;
+  font: 700 11px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+.bathy-title {
+  flex: 1 1 auto;
+  font: 700 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+.bathy-close-btn,
+.bathy-collapse-btn {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text-secondary);
+  font: 700 12px/1 var(--font-mono);
+  cursor: pointer;
+}
+.bathy-close-btn:hover { color: #ffffff; border-color: #ffffff; }
+.bathy-collapse-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.bathy-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.bathy-body::-webkit-scrollbar { width: 5px; }
+.bathy-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+}
+.bathy-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0.2));
+  border-radius: 999px;
+}
+.bathy-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 3;
+  touch-action: none;
+}
+.bathy-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--glass-border) 0, var(--glass-border) 1.4px,
+    transparent 1.4px, transparent 4px
+  );
+}
+.bathy-resize-handle:hover::after, .bathy-resize-handle.is-active::after {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--accent) 0, var(--accent) 1.4px,
+    transparent 1.4px, transparent 4px
+  );
+}
+.bathy-pad.is-collapsed .bathy-body { display: none; }
+
 @media (max-width: 720px), (max-height: 520px) {
-  .mapovl-pad, .coordbox-pad, .hudread-pad, .restoretray-pad { display: none; }
+  .mapovl-pad, .coordbox-pad, .hudread-pad, .restoretray-pad, .bathy-pad { display: none; }
 }
