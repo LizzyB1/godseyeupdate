@@ -9364,30 +9364,6 @@ body.scene-playback-mode #first-run-launcher {
   color: var(--text-secondary);
 }
 
-/* ── Move (strafe) pad ───────────────────────────────────────────── */
-.camctl-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  grid-template-areas:
-    'nw n ne'
-    'w i e'
-    'sw s se';
-  gap: 4px;
-  width: 78%;
-  max-width: 110px;
-  min-width: 96px;
-  aspect-ratio: 1;
-}
-.camctl-nw { grid-area: nw; }
-.camctl-n { grid-area: n; }
-.camctl-ne { grid-area: ne; }
-.camctl-w { grid-area: w; }
-.camctl-e { grid-area: e; }
-.camctl-sw { grid-area: sw; }
-.camctl-s { grid-area: s; }
-.camctl-se { grid-area: se; }
-
 .camctl-btn {
   display: flex;
   align-items: center;
@@ -9418,27 +9394,12 @@ body.scene-playback-mode #first-run-launcher {
   box-shadow: 0 0 16px var(--accent-glow);
 }
 
-.camctl-info {
-  grid-area: i;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  border-radius: 999px;
-  border: 1px solid var(--glass-border);
-  background: transparent;
-  color: var(--text-dim);
-  font: 700 11px/1 var(--font-mono);
-  cursor: help;
-}
-
-/* ── Dedicated pitch pair (split out of the move pad) ───────────────── */
-.camctl-pitch {
+/* ── Simple two-button rows: lateral, orbit, pitch ───────────────────── */
+.camctl-row {
   display: flex;
   gap: 8px;
 }
-.camctl-pitch-btn {
+.camctl-row-btn {
   width: 30px;
   height: 26px;
   font: 700 13px/1 var(--font-mono);
