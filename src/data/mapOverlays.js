@@ -2,22 +2,28 @@ import * as Cesium from 'cesium';
 import { marchingSquaresSegments, gridToLonLat } from './contourMath.js';
 import { formatLatLonDMS, formatLatLonDecimal, googleMapsLink, formatHeight } from './coordFormat.js';
 import { resolveApiKey } from '../apiKeys.js';
+import { sampleSceneHeights } from './sceneHeight.js';
+import { getSharedCache } from './apiCache.js';
 
 /**
  * @file Cesium-facing engine behind the "Map Overlays" control box: elevation
  * contour lines, vertical (height-relief) exaggeration, a lat/lon graticule,
  * and a click-to-place coordinate cursor with reverse geocoding + a
  * viewport-screenshot capture. Kept as one module since all of it shares the
- * same terrain-height plumbing and the same control box.
+ * same height plumbing and the same control box.
  *
  * The globe mesh itself is hidden in this app (`viewer.scene.globe.show =
  * false` — visuals come from the Google Photorealistic 3D Tileset instead,
- * see main.js), and no terrain provider is otherwise configured, so real
- * elevation values for contours/height come from a dedicated Cesium World
- * Terrain provider created here purely for height *queries*
- * (`Cesium.sampleTerrainMostDetailed`) — it is never assigned to
- * `viewer.terrainProvider` and never rendered, so it can't affect the
- * existing visual pipeline at all.
+ * see main.js), and no terrain provider is otherwise configured. Contour
+ * heights used to come from a separate Cesium World Terrain provider
+ * fetched purely for height queries — but that DEM can (and did, per field
+ * testing) disagree with the visible tileset surface by a meaningful
+ * margin, making contours sit off the rendered ground. Heights now come
+ * from `data/sceneHeight.js`, which samples the SAME scene the operator is
+ * looking at (`scene.sampleHeight`, the pattern `data/traffic.js` already
+ * uses for road base heights) — this also drops the Cesium Ion terrain
+ * dependency entirely, so contours no longer need any token/network access
+ * beyond the tileset the app is already streaming.
  *
  * Contour lines don't need ground-clamping/draping tricks: each contour
  * level IS a height, so its polyline vertices are simply placed at that
@@ -30,11 +36,21 @@ import { resolveApiKey } from '../apiKeys.js';
 
 const STORAGE_KEY = 'godsEyeView.mapOverlays.state';
 const RECOMPUTE_DEBOUNCE_MS = 550;
-const CONTOUR_GRID_COLS = 42;
-const CONTOUR_GRID_ROWS = 30;
+// Sampling the live scene is a synchronous per-point ray-pick rather than a
+// batched DEM-tile fetch, so the grid is kept smaller than the old
+// terrain-provider version to stay cheap on every recompute.
+const CONTOUR_GRID_COLS = 28;
+const CONTOUR_GRID_ROWS = 20;
 const MAX_CONTOUR_VIEW_SPAN_DEG = 1.5; // ~165km — above this, contours are too coarse to be meaningful
 const MAX_CONTOUR_LEVELS = 60; // hard cap so pathological relief can't spawn thousands of polylines
 const MAX_GRID_LINES_PER_AXIS = 60;
+// If more than this fraction of the sampled grid comes back unresolved
+// (tiles for a freshly-panned-to area haven't streamed in yet), retry once
+// after a short delay instead of leaving contours sparse/missing.
+const RETRY_MIN_FINITE_FRACTION = 0.6;
+const RETRY_DELAY_MS = 800;
+/** Cache store name (see data/apiCache.js) for reverse-geocode results — addresses for a given point essentially never change. */
+const GEOCODE_CACHE_STORE = 'geocode';
 
 export const DEFAULT_STATE = Object.freeze({
   contoursEnabled: false,
@@ -70,15 +86,13 @@ export class MapOverlaysEngine {
     this.viewer = viewer;
     this.state = loadState();
 
-    /** @type {?Promise<Cesium.CesiumTerrainProvider>} */
-    this._terrainProviderPromise = null;
-    this._terrainStatus = 'idle'; // idle | loading | ready | unavailable
-
     this._contourPrimitive = null;
     this._gridPrimitive = null;
     this._recomputeTimer = null;
     this._contourStatus = ''; // status line shown in the UI
     this._computeToken = 0;
+    /** Whether a sparse-height retry has already fired for the in-flight recompute cycle — bounds it to one retry, never a loop. */
+    this._retriedThisCycle = false;
 
     this._cursorActive = false;
     this._cursorEntity = null;
@@ -107,23 +121,6 @@ export class MapOverlaysEngine {
   _setStatus(text) {
     this._contourStatus = text;
     this.onStatusChange?.(text);
-  }
-
-  // ── terrain provider (height queries only, never rendered) ─────────
-  async _getTerrainProvider() {
-    if (this._terrainProviderPromise) return this._terrainProviderPromise;
-    this._terrainStatus = 'loading';
-    this._terrainProviderPromise = Cesium.createWorldTerrainAsync({ requestVertexNormals: false, requestWaterMask: false })
-      .then((provider) => {
-        this._terrainStatus = 'ready';
-        return provider;
-      })
-      .catch((err) => {
-        this._terrainStatus = 'unavailable';
-        this._terrainProviderPromise = null;
-        throw err;
-      });
-    return this._terrainProviderPromise;
   }
 
   // ── vertical exaggeration ───────────────────────────────────────────
@@ -177,6 +174,7 @@ export class MapOverlaysEngine {
 
   _scheduleRecompute() {
     if (this._recomputeTimer) clearTimeout(this._recomputeTimer);
+    this._retriedThisCycle = false;
     this._recomputeTimer = setTimeout(() => this._recomputeContours(), RECOMPUTE_DEBOUNCE_MS);
   }
 
@@ -193,16 +191,6 @@ export class MapOverlaysEngine {
       return;
     }
 
-    let terrainProvider;
-    try {
-      this._setStatus('Loading terrain data…');
-      terrainProvider = await this._getTerrainProvider();
-    } catch {
-      this._setStatus('Terrain data unavailable — check the Cesium Ion Token in Settings.');
-      return;
-    }
-    if (token !== this._computeToken) return; // superseded by a newer request
-
     const west = Cesium.Math.toDegrees(rect.west);
     const south = Cesium.Math.toDegrees(rect.south);
     const east = Cesium.Math.toDegrees(rect.east);
@@ -210,30 +198,29 @@ export class MapOverlaysEngine {
 
     const rows = CONTOUR_GRID_ROWS;
     const cols = CONTOUR_GRID_COLS;
-    const positions = [];
+    const lonLatPairs = [];
     for (let r = 0; r < rows; r += 1) {
       const lat = north - (r / (rows - 1)) * (north - south);
       for (let c = 0; c < cols; c += 1) {
         const lon = west + (c / (cols - 1)) * (east - west);
-        positions.push(Cesium.Cartographic.fromDegrees(lon, lat));
+        lonLatPairs.push({ lon, lat });
       }
     }
 
-    this._setStatus('Sampling terrain heights…');
-    let sampled;
-    try {
-      sampled = await Cesium.sampleTerrainMostDetailed(terrainProvider, positions);
-    } catch {
-      this._setStatus('Terrain sampling failed — try again after the view settles.');
-      return;
-    }
-    if (token !== this._computeToken) return;
+    this._setStatus('Sampling scene heights…');
+    const heights = sampleSceneHeights(this.viewer.scene, lonLatPairs);
+    if (token !== this._computeToken) return; // superseded by a newer request
 
-    const heights = sampled.map((c) => (Number.isFinite(c.height) ? c.height : NaN));
     const finite = heights.filter(Number.isFinite);
+    if (finite.length / heights.length < RETRY_MIN_FINITE_FRACTION && !this._retriedThisCycle) {
+      // Likely a freshly-panned-to area whose tiles haven't streamed in yet
+      // — retry once shortly rather than leaving contours sparse or absent.
+      this._retriedThisCycle = true;
+      setTimeout(() => { if (token === this._computeToken) this._recomputeContours(); }, RETRY_DELAY_MS);
+    }
     if (!finite.length) {
       this._clearContours();
-      this._setStatus('No terrain height data at this location.');
+      this._setStatus('No renderable surface here yet — move the view or wait for tiles to load.');
       return;
     }
     const minH = Math.min(...finite);
@@ -453,12 +440,31 @@ export class MapOverlaysEngine {
       if (this._cursorData) { this._cursorData.address = null; this._cursorData.addressStatus = 'no-key'; this.onCursorChange?.(this._cursorData); }
       return;
     }
+
+    // Reverse-geocoded addresses are "broadly unchangeable content" for a
+    // given point — cache them durably (data/apiCache.js) so re-clicking a
+    // nearby spot doesn't re-hit the Google API every time.
+    const cache = getSharedCache();
+    const cacheKey = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+    try {
+      const cached = await cache.get(GEOCODE_CACHE_STORE, cacheKey);
+      if (cached && token === this._geocodeToken) {
+        if (this._cursorData) {
+          this._cursorData.address = cached.address;
+          this._cursorData.addressStatus = cached.address ? 'ok' : 'not-found';
+          this.onCursorChange?.(this._cursorData);
+        }
+        return;
+      }
+    } catch { /* cache unavailable — fall through to a live lookup */ }
+
     try {
       const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lon}&key=${apiKey}`;
       const response = await fetch(url);
       const data = await response.json();
       if (token !== this._geocodeToken) return;
       const address = (data.status === 'OK' && data.results?.length) ? data.results[0].formatted_address : null;
+      try { await cache.put(GEOCODE_CACHE_STORE, cacheKey, { address }); } catch { /* best-effort */ }
       if (this._cursorData) {
         this._cursorData.address = address;
         this._cursorData.addressStatus = address ? 'ok' : 'not-found';

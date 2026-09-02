@@ -1,4 +1,7 @@
 import * as Cesium from 'cesium';
+import { sampleSceneHeights, DEFAULT_HEIGHT_OFFSET } from './sceneHeight.js';
+import { getSharedCache } from './apiCache.js';
+import { tilesForRect, dedupeElements } from './overpassTiling.js';
 
 /**
  * @file "Signpost" labels — mountain/peak names and the OSM place-name
@@ -8,13 +11,26 @@ import * as Cesium from 'cesium';
  *
  * There's no place-name/peak dataset anywhere in this app to draw from, so
  * this queries OpenStreetMap's Overpass API for named `natural=peak` nodes
- * and `place=*` nodes within the current viewport — through the app's own
- * `/api/overpass` proxy (see vite.config.js), the same endpoint
- * `data/traffic.js` and the annotation/geocoding code already use for road
- * and boundary lookups, so this gets the same caching/rate-limiting for
- * free. Overpass is a public, best-effort service: a slow mirror or a
- * timeout just leaves the last-known labels on screen and shows a status
- * line — it never throws into the render loop.
+ * and `place=*` nodes — through the app's own `/api/overpass` proxy (see
+ * vite.config.js), the same endpoint `data/traffic.js` and the
+ * annotation/geocoding code already use for road and boundary lookups.
+ * Queries are snapped to a coarse fixed tile grid (`data/overpassTiling.js`)
+ * and each tile's result is cached durably (`data/apiCache.js`) — place and
+ * peak names are "broadly unchangeable content", so a viewport that's been
+ * queried before (even under a differently-panned/zoomed camera) reuses the
+ * cached tile instead of re-hitting Overpass. A view needing more tiles
+ * than is worth fetching individually falls back to one direct, uncached
+ * query spanning the whole viewport. Overpass is a public, best-effort
+ * service: a slow mirror or a timeout just leaves the last-known labels on
+ * screen and shows a status line — it never throws into the render loop.
+ *
+ * Labels used to rely on `Cesium.HeightReference.CLAMP_TO_GROUND`, which
+ * isn't reliable in a scene with `globe.show = false` and no terrain
+ * provider (see main.js / data/sceneHeight.js's module doc comment) —
+ * billboards/labels could silently resolve to height≈0 and end up hidden
+ * beneath the rendered 3D Tileset surface, which is what "signposts not
+ * showing up" actually was. Positions are now computed explicitly via
+ * `data/sceneHeight.js`, sampling the same scene the operator sees.
  *
  * Fetching (network, debounced on camera moveEnd) and rendering (pure
  * filter + billboard/label rebuild from the last fetched elements) are
@@ -28,6 +44,15 @@ const OVERPASS_URL = '/api/overpass';
 const STORAGE_KEY = 'godsEyeView.signposts.state';
 const FETCH_DEBOUNCE_MS = 500;
 const MAX_VIEW_SPAN_DEG = 6; // above this, the viewport is too big for a meaningful place-name query
+/** Cache store name (see data/apiCache.js) for per-tile Overpass results. */
+const OVERPASS_CACHE_STORE = 'overpassTiles';
+/** Billboards/labels sit a bit further off the surface than a track dot so they clear the mesh even at a grazing view angle. */
+const SIGNPOST_HEIGHT_OFFSET = DEFAULT_HEIGHT_OFFSET + 0.5;
+// If more than this fraction of a render pass's candidates fell back to an
+// unresolved (default) height, retry the render once shortly — likely means
+// tiles for a freshly-panned-to area hadn't streamed in yet.
+const RETRY_MIN_RESOLVED_FRACTION = 0.6;
+const RETRY_DELAY_MS = 800;
 
 /**
  * Detail levels 0 (sparsest) .. 6 (densest) — each widens which OSM
@@ -112,6 +137,8 @@ export class SignpostLabels {
     this._fetchTimer = null;
     this._fetchToken = 0;
     this._status = '';
+    /** Whether an unresolved-heights retry render has already fired for the in-flight fetch/render cycle — bounds it to one retry, never a loop. */
+    this._retriedThisCycle = false;
 
     /** @type {?Function} UI callback: (statusText) => void */
     this.onStatusChange = null;
@@ -155,6 +182,7 @@ export class SignpostLabels {
 
   _scheduleFetch() {
     if (this._fetchTimer) clearTimeout(this._fetchTimer);
+    this._retriedThisCycle = false;
     this._fetchTimer = setTimeout(() => this._fetch(), FETCH_DEBOUNCE_MS);
   }
 
@@ -172,25 +200,55 @@ export class SignpostLabels {
     const west = Cesium.Math.toDegrees(rect.west);
     const north = Cesium.Math.toDegrees(rect.north);
     const east = Cesium.Math.toDegrees(rect.east);
-    const query = buildOverpassQuery(south, west, north, east);
 
     const token = ++this._fetchToken;
     this._setStatus('Loading labels…');
-    let data;
+    let elements;
     try {
-      const response = await fetch(OVERPASS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(query)}`,
-      });
-      if (!response.ok) throw new Error(`Overpass returned ${response.status}`);
-      data = await response.json();
+      elements = await this._fetchElementsForRect(south, west, north, east);
     } catch {
       if (token !== this._fetchToken) return;
       this._setStatus('Label lookup failed — will retry when the view moves.');
       return;
     }
     if (token !== this._fetchToken) return;
+
+    this._elements = elements;
+    this._render();
+  }
+
+  /**
+   * Elements covering a view rectangle, tile-cached where the view fits
+   * within `overpassTiling.js`'s tile budget, or one direct uncached query
+   * for a view too wide to tile sensibly.
+   */
+  async _fetchElementsForRect(south, west, north, east) {
+    const tiles = tilesForRect(south, west, north, east);
+    if (!tiles) return this._queryOverpass(south, west, north, east);
+
+    const cache = getSharedCache();
+    const perTile = await Promise.all(tiles.map(async (tile) => {
+      try {
+        const cached = await cache.get(OVERPASS_CACHE_STORE, tile.key);
+        if (cached) return cached;
+      } catch { /* cache unavailable — fall through to a live query */ }
+      const tileElements = await this._queryOverpass(tile.south, tile.west, tile.north, tile.east);
+      try { await cache.put(OVERPASS_CACHE_STORE, tile.key, tileElements); } catch { /* best-effort */ }
+      return tileElements;
+    }));
+    return dedupeElements(perTile.flat());
+  }
+
+  /** One direct, uncached Overpass query for the given bounding box. */
+  async _queryOverpass(south, west, north, east) {
+    const query = buildOverpassQuery(south, west, north, east);
+    const response = await fetch(OVERPASS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`,
+    });
+    if (!response.ok) throw new Error(`Overpass returned ${response.status}`);
+    const data = await response.json();
 
     const elements = [];
     for (const item of data?.elements || []) {
@@ -201,8 +259,7 @@ export class SignpostLabels {
         elements.push({ kind: 'place', name: item.tags.name, lat: item.lat, lon: item.lon, ele: NaN, tier: item.tags.place });
       }
     }
-    this._elements = elements;
-    this._render();
+    return elements;
   }
 
   _clearEntities() {
@@ -227,14 +284,22 @@ export class SignpostLabels {
       })
       .slice(0, level.budget);
 
-    for (const item of candidates) {
-      const position = Cesium.Cartesian3.fromDegrees(item.lon, item.lat);
+    // Explicit scene-sampled positions instead of CLAMP_TO_GROUND — see the
+    // module doc comment. A candidate the scene can't yet resolve falls
+    // back to its own OSM `ele` (peaks only) or 0.
+    const sampledHeights = sampleSceneHeights(this.viewer.scene, candidates.map((item) => ({ lon: item.lon, lat: item.lat })));
+    let unresolvedCount = 0;
+
+    candidates.forEach((item, i) => {
+      const resolved = Number.isFinite(sampledHeights[i]);
+      if (!resolved) unresolvedCount += 1;
+      const baseHeight = resolved ? sampledHeights[i] : (Number.isFinite(item.ele) ? item.ele : 0);
+      const position = Cesium.Cartesian3.fromDegrees(item.lon, item.lat, baseHeight + SIGNPOST_HEIGHT_OFFSET);
       const isPeak = item.kind === 'peak';
       const entity = this.viewer.entities.add({
         position,
         billboard: {
           image: isPeak ? PEAK_ICON : PLACE_ICON,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           scale: isPeak ? 0.9 : 0.85,
           disableDepthTestDistance: 0,
@@ -246,7 +311,6 @@ export class SignpostLabels {
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
           pixelOffset: new Cesium.Cartesian2(10, isPeak ? -14 : -22),
@@ -255,6 +319,14 @@ export class SignpostLabels {
         },
       });
       this._entities.push(entity);
+    });
+
+    if (candidates.length && unresolvedCount / candidates.length > (1 - RETRY_MIN_RESOLVED_FRACTION) && !this._retriedThisCycle) {
+      // Likely a freshly-panned-to area whose tiles haven't streamed in yet
+      // — retry the render once shortly rather than leaving labels stuck at
+      // a fallback height.
+      this._retriedThisCycle = true;
+      setTimeout(() => { if (this.state.enabled) this._render(); }, RETRY_DELAY_MS);
     }
 
     this._setStatus(`${candidates.length} signpost${candidates.length === 1 ? '' : 's'} — ${level.label}.`);

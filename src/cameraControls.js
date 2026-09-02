@@ -46,10 +46,10 @@ import * as Cesium from 'cesium';
  * ground level) — the same scaling R/F zoom already uses for its own
  * forward/backward dolly.
  *
- * Pitch — tilting the view up/down — has its own dedicated pair:
- * PageUp/PageDown. Q/E roll the camera (rotate about the view axis); R/F
- * zoom, which already doubles as forward/backward dolly since lateral
- * (WASD) movement covers ground-plane translation instead.
+ * Pitch — tilting the view up/down — has its own dedicated pair: T/G
+ * (T pitches up, G pitches down). Q/E roll the camera (rotate about the
+ * view axis); R/F zoom, which already doubles as forward/backward dolly
+ * since lateral (WASD) movement covers ground-plane translation instead.
  *
  * A live orientation readout lives at the top of the control box: a compass
  * needle that swings to the camera's current heading, with a small
@@ -60,7 +60,7 @@ import * as Cesium from 'cesium';
  * orbit/pan.
  *
  * Mouse: holding the left+right buttons together and dragging vertically
- * pitches (same axis as PageUp/PageDown); holding the right button alone
+ * pitches (same axis as T/G); holding the right button alone
  * and dragging horizontally rolls (same axis as Q/E). This claims the
  * right mouse button, so Cesium's native right-drag zoom is disabled in
  * favor of it (scroll-wheel zoom, and the R/F keys, still work).
@@ -114,7 +114,7 @@ const KEY_TO_ACTION = {
   KeyW: 'lateralForward', KeyS: 'lateralBackward', KeyA: 'lateralLeft', KeyD: 'lateralRight',
   Digit1: 'orbitLeft', Digit3: 'orbitRight',
   KeyZ: 'yawLeft', KeyC: 'yawRight',
-  PageUp: 'pitchUp', PageDown: 'pitchDown',
+  KeyT: 'pitchUp', KeyG: 'pitchDown',
   KeyQ: 'rollLeft', KeyE: 'rollRight',
   KeyR: 'zoomIn', KeyF: 'zoomOut',
 };
@@ -148,8 +148,8 @@ const YAW_BUTTONS = [
 
 /** Dedicated pitch pair. */
 const PITCH_BUTTONS = [
-  { actions: ['pitchUp'], label: '▲', title: 'Pitch up (PageUp)' },
-  { actions: ['pitchDown'], label: '▼', title: 'Pitch down (PageDown)' },
+  { actions: ['pitchUp'], label: '▲', title: 'Pitch up (T)' },
+  { actions: ['pitchDown'], label: '▼', title: 'Pitch down (G)' },
 ];
 
 const ROLL_ZOOM_BUTTONS = [
@@ -440,8 +440,8 @@ function buildControlBox({ onPress, onRelease }) {
 
   const legend = document.createElement('div');
   legend.className = 'camctl-legend';
-  legend.title = 'WASD/arrows slide across the ground · 1/3/Left/Right orbit a ground point · Z/C rotate in place · PageUp/PageDown pitch · Q/E or right-drag roll · R/F zoom · mouse L+R drag pitch';
-  legend.textContent = 'WASD lateral · 1/3 orbit · Z/C rotate · PgUp/PgDn pitch · Q/E roll · R/F zoom';
+  legend.title = 'WASD/arrows slide across the ground · 1/3/Left/Right orbit a ground point · Z/C rotate in place · T/G pitch · Q/E or right-drag roll · R/F zoom · mouse L+R drag pitch';
+  legend.textContent = 'WASD lateral · 1/3 orbit · Z/C rotate · T/G pitch · Q/E roll · R/F zoom';
   body.appendChild(legend);
 
   // ── Resize handle (bottom-right corner) ────────────────────────────

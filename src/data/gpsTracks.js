@@ -1,12 +1,28 @@
 import * as Cesium from 'cesium';
 import { trackBounds, trackFlags } from './gpsTrackParse.js';
+import { sampleSceneHeights } from './sceneHeight.js';
+import { pickSampleIndices, interpolateHeights } from './heightInterp.js';
 
 /**
  * @file Cesium rendering layer for parsed GPS tracks — turns the plain
  * `{ name, segments }` shape produced by `gpsTrackParse.js` into glowing
- * polyline entities on the live globe, draped on the real terrain the app
- * already renders (no separate DEM fetch / mesh export needed — that's the
- * part of gpx_to_3d.py this feature deliberately leaves out).
+ * polyline entities on the live globe.
+ *
+ * Track height used to come straight from the file's own recorded `ele`
+ * field, trusted as-is. That can (and, per field testing, does) disagree
+ * with the app's actual rendered ground — the Google Photorealistic 3D
+ * Tileset — by a meaningful margin (GPS-logged elevation is often
+ * orthometric/MSL-referenced rather than the ellipsoidal height the scene
+ * uses, on top of the logger's own vertical error), which is why tracks
+ * could appear to float above or sink below the visible terrain. Heights
+ * now come from `data/sceneHeight.js`, sampling the SAME scene the operator
+ * sees (`scene.sampleHeight`) — the file's `ele` is now only ever used as a
+ * last-resort fallback when the scene can't yet resolve a point. Sampling
+ * every point of a very long track individually isn't worth the per-point
+ * ray-pick cost, so a segment's line is built from a capped, evenly-spaced
+ * subset of directly-sampled points with the rest linearly interpolated by
+ * index (`data/heightInterp.js`); flag markers (start/end/interval) are few
+ * enough per track to sample directly every time.
  *
  * Also places flag markers along each track: a start flag, a checkered end
  * flag, and interval flags every 100 m and every 2 minutes (both computed by
@@ -22,6 +38,11 @@ import { trackBounds, trackFlags } from './gpsTrackParse.js';
  *
  * @module data/gpsTracks
  */
+
+/** Vertical offset (meters) lifting sampled track/flag heights clear of the rendered mesh to avoid z-fighting — same idea as data/traffic.js's DOT_HEIGHT_OFFSET. */
+const TRACK_HEIGHT_OFFSET_M = 2.0;
+/** Above this many points, a segment's line samples only a spaced subset directly and interpolates the rest, rather than ray-picking every point. */
+const MAX_DIRECT_HEIGHT_SAMPLES = 300;
 
 /** Cycled per loaded track, matching the spirit of gpx_to_3d.py's own TRACK_COLORS palette. */
 const TRACK_COLORS = [
@@ -107,8 +128,9 @@ export class GpsTrackOverlay {
 
     parsed.segments.forEach((seg, segIdx) => {
       if (seg.length < 2) return; // a lone point can't draw a line; still counted in bounds/pointCount
+      const heights = this._sampleSegmentHeights(seg);
       const positions = Cesium.Cartesian3.fromDegreesArrayHeights(
-        seg.flatMap((p) => [p.lon, p.lat, Number.isFinite(p.ele) ? p.ele : 0]),
+        seg.flatMap((p, i) => [p.lon, p.lat, heights[i] + TRACK_HEIGHT_OFFSET_M]),
       );
       const entity = this.viewer.entities.add({
         id: `${id}-seg-${segIdx}`,
@@ -129,12 +151,12 @@ export class GpsTrackOverlay {
       const end = seg[seg.length - 1];
       lineEntities.push(this.viewer.entities.add({
         id: `${id}-seg-${segIdx}-start`,
-        position: Cesium.Cartesian3.fromDegrees(start.lon, start.lat, start.ele || 0),
+        position: Cesium.Cartesian3.fromDegrees(start.lon, start.lat, heights[0] + TRACK_HEIGHT_OFFSET_M),
         point: { pixelSize: 6, color: Cesium.Color.fromCssColorString(color), outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
       }));
       lineEntities.push(this.viewer.entities.add({
         id: `${id}-seg-${segIdx}-end`,
-        position: Cesium.Cartesian3.fromDegrees(end.lon, end.lat, end.ele || 0),
+        position: Cesium.Cartesian3.fromDegrees(end.lon, end.lat, heights[heights.length - 1] + TRACK_HEIGHT_OFFSET_M),
         point: { pixelSize: 6, color: Cesium.Color.fromCssColorString(color), outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
       }));
     });
@@ -164,14 +186,49 @@ export class GpsTrackOverlay {
   }
 
   /**
+   * Real, scene-sampled heights (meters above the ellipsoid, one per point
+   * in `seg`) for a track segment — see the module doc comment. Long
+   * segments sample only a capped, evenly-spaced subset directly and
+   * interpolate the rest by index; any point the scene still can't resolve
+   * (interpolation had nothing finite to work from at all) falls back to
+   * the file's own recorded `ele`, or 0 as a last resort.
+   * @param {Array<{lat:number,lon:number,ele:number}>} seg
+   * @returns {number[]}
+   */
+  _sampleSegmentHeights(seg) {
+    const scene = this.viewer.scene;
+    let heights;
+    if (seg.length <= MAX_DIRECT_HEIGHT_SAMPLES) {
+      heights = sampleSceneHeights(scene, seg.map((p) => ({ lon: p.lon, lat: p.lat })));
+    } else {
+      const idx = pickSampleIndices(seg.length, MAX_DIRECT_HEIGHT_SAMPLES);
+      const sampled = sampleSceneHeights(scene, idx.map((i) => ({ lon: seg[i].lon, lat: seg[i].lat })));
+      heights = interpolateHeights(seg.length, idx, sampled);
+    }
+    return heights.map((h, i) => (Number.isFinite(h) ? h : (Number.isFinite(seg[i].ele) ? seg[i].ele : 0)));
+  }
+
+  /**
    * Start (green), end (checkered), and every-100m/every-2min interval
    * flags for a track, computed by `trackFlags` — see the module doc
    * comment for why distance and time intervals are separate marker sets.
+   * Flag counts per track are small regardless of track length, so each
+   * flag point is sampled directly rather than reusing the line's
+   * interpolated heights.
    */
   _buildFlagEntities(id, segments) {
     const { start, end, distanceFlags, timeFlags } = trackFlags(segments);
     const entities = [];
-    const heightOf = (p) => (Number.isFinite(p.ele) ? p.ele : 0);
+
+    const flagPoints = [start, end, ...distanceFlags.map((f) => f.point), ...timeFlags.map((f) => f.point)]
+      .filter(Boolean);
+    const sampled = sampleSceneHeights(this.viewer.scene, flagPoints.map((p) => ({ lon: p.lon, lat: p.lat })));
+    const heightByPoint = new Map();
+    flagPoints.forEach((p, i) => {
+      const h = Number.isFinite(sampled[i]) ? sampled[i] : (Number.isFinite(p.ele) ? p.ele : 0);
+      heightByPoint.set(p, h + TRACK_HEIGHT_OFFSET_M);
+    });
+    const heightOf = (p) => heightByPoint.get(p) ?? ((Number.isFinite(p.ele) ? p.ele : 0) + TRACK_HEIGHT_OFFSET_M);
 
     if (start) {
       entities.push(this.viewer.entities.add({
