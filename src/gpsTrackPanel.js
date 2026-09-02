@@ -151,20 +151,29 @@ export class GpsTrackPanel {
     row.className = 'gps-track-row';
     row.dataset.trackId = result.id;
     row.innerHTML = `
-      <span class="gps-track-row__swatch" style="background:${result.color}"></span>
+      <input type="color" class="gps-track-row__color" value="${result.color}"
+             title="Track color" aria-label="Track color for ${result.name}">
       <div class="gps-track-row__meta">
         <div class="gps-track-row__name" title="${result.name}">${result.name}</div>
         <div class="gps-track-row__sub">${result.pointCount} pts · ${result.segmentCount} seg</div>
       </div>
       <button type="button" class="gps-track-row__btn" data-action="fly" title="Fly to track">Fly</button>
+      <button type="button" class="gps-track-row__btn is-active" data-action="flags" title="Show/hide start/end/interval flags">Flags</button>
       <button type="button" class="gps-track-row__btn" data-action="toggle" title="Show/hide track">Hide</button>
       <button type="button" class="gps-track-row__btn gps-track-row__btn--danger" data-action="remove" title="Remove track">✕</button>
     `;
+    row.querySelector('.gps-track-row__color').addEventListener('input', (e) => {
+      this.overlay.setColor(result.id, e.target.value);
+    });
     row.addEventListener('click', (e) => {
       const action = e.target?.dataset?.action;
       if (!action) return;
       if (action === 'fly') this.overlay.flyTo(result.id);
-      else if (action === 'toggle') {
+      else if (action === 'flags') {
+        this.overlay.toggleFlagsVisible(result.id);
+        const nowVisible = this.overlay.tracks.get(result.id)?.flagsVisible;
+        e.target.classList.toggle('is-active', nowVisible);
+      } else if (action === 'toggle') {
         this.overlay.toggleVisible(result.id);
         const nowVisible = this.overlay.tracks.get(result.id)?.visible;
         e.target.textContent = nowVisible ? 'Hide' : 'Show';

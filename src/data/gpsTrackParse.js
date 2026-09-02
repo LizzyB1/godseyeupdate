@@ -345,3 +345,70 @@ export function trackBounds(segments) {
     segmentCount: segments.length,
   };
 }
+
+const EARTH_RADIUS_M = 6371000;
+
+/** Great-circle distance in meters between two `{lat,lon}` points (haversine). */
+function haversineMeters(a, b) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * Start/end points plus regularly-spaced distance and time interval flags
+ * along a track's segments — pure haversine geometry and timestamp deltas,
+ * no Cesium needed (the Cesium entity layer is `data/gpsTracks.js`). A
+ * segment break (logger dropout / big time gap — see `splitNmeaSegments`)
+ * resets both accumulators rather than bridging across the gap, matching
+ * how the rest of this module already treats a break as a real one.
+ * @param {TrackPoint[][]} segments
+ * @param {{distanceStepM?:number, timeStepMs?:number}} [opts]
+ * @returns {{
+ *   start: ?TrackPoint,
+ *   end: ?TrackPoint,
+ *   distanceFlags: Array<{point:TrackPoint, meters:number}>,
+ *   timeFlags: Array<{point:TrackPoint, minutes:number}>,
+ * }}
+ */
+export function trackFlags(segments, opts = {}) {
+  const distanceStepM = opts.distanceStepM ?? 100;
+  const timeStepMs = opts.timeStepMs ?? 2 * 60 * 1000;
+  const distanceFlags = [];
+  const timeFlags = [];
+  let start = null;
+  let end = null;
+
+  for (const seg of segments) {
+    if (!seg.length) continue;
+    if (!start) start = seg[0];
+    end = seg[seg.length - 1];
+    if (seg.length < 2) continue;
+
+    let cumDist = 0;
+    let nextDist = distanceStepM;
+    const baseTime = seg[0].time instanceof Date ? seg[0].time.getTime() : null;
+    let nextTimeMs = timeStepMs;
+
+    for (let i = 1; i < seg.length; i += 1) {
+      cumDist += haversineMeters(seg[i - 1], seg[i]);
+      while (cumDist >= nextDist) {
+        distanceFlags.push({ point: seg[i], meters: nextDist });
+        nextDist += distanceStepM;
+      }
+      if (baseTime != null && seg[i].time instanceof Date) {
+        const elapsed = seg[i].time.getTime() - baseTime;
+        while (elapsed >= nextTimeMs) {
+          timeFlags.push({ point: seg[i], minutes: nextTimeMs / 60000 });
+          nextTimeMs += timeStepMs;
+        }
+      }
+    }
+  }
+
+  return { start, end, distanceFlags, timeFlags };
+}

@@ -1,5 +1,5 @@
 import * as Cesium from 'cesium';
-import { trackBounds } from './gpsTrackParse.js';
+import { trackBounds, trackFlags } from './gpsTrackParse.js';
 
 /**
  * @file Cesium rendering layer for parsed GPS tracks — turns the plain
@@ -7,6 +7,14 @@ import { trackBounds } from './gpsTrackParse.js';
  * polyline entities on the live globe, draped on the real terrain the app
  * already renders (no separate DEM fetch / mesh export needed — that's the
  * part of gpx_to_3d.py this feature deliberately leaves out).
+ *
+ * Also places flag markers along each track: a start flag, a checkered end
+ * flag, and interval flags every 100 m and every 2 minutes (both computed by
+ * `gpsTrackParse.js`'s Cesium-free `trackFlags`) — separate marker sets
+ * since a distance-based and a time-based interval land on different points
+ * whenever the recorded pace isn't perfectly steady. Flags are optional per
+ * track (`setFlagsVisible`) and track color is user-customizable after load
+ * (`setColor`), not just the auto-cycled default.
  *
  * Kept separate from `gpsTrackParse.js` so the parsing stays unit-testable
  * without a Cesium/WebGL context; this module is the only one here that
@@ -27,12 +35,46 @@ const TRACK_COLORS = [
   '#ff4444', // red
 ];
 
+/** Offered in the track color picker alongside a free-form color input. */
+export const TRACK_COLOR_SWATCHES = TRACK_COLORS;
+
 let colorCursor = 0;
 function nextColor() {
   const c = TRACK_COLORS[colorCursor % TRACK_COLORS.length];
   colorCursor += 1;
   return c;
 }
+
+function svgDataUri(svg) {
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+/** Solid-color pennant-on-a-pole flag icon, used for interval markers. */
+function intervalFlagIcon(hexColor) {
+  return svgDataUri(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="22" viewBox="0 0 18 22">`
+    + `<rect x="1.5" y="1" width="1.6" height="19" fill="#1a1a1a"/>`
+    + `<path d="M3.1 1 L16 4.6 L3.1 8.2 Z" fill="${hexColor}" stroke="#111" stroke-width="0.8"/>`
+    + `</svg>`,
+  );
+}
+
+const START_FLAG_ICON = svgDataUri(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="22" viewBox="0 0 18 22">'
+  + '<rect x="1.5" y="1" width="1.6" height="19" fill="#1a1a1a"/>'
+  + '<path d="M3.1 1 L16 4.6 L3.1 8.2 Z" fill="#22c55e" stroke="#0b3d1e" stroke-width="0.8"/>'
+  + '</svg>',
+);
+const END_FLAG_ICON = svgDataUri(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="22" viewBox="0 0 18 22">'
+  + '<defs><pattern id="chk" width="4" height="4" patternUnits="userSpaceOnUse">'
+  + '<rect width="2" height="2" fill="#000"/><rect x="2" y="2" width="2" height="2" fill="#000"/>'
+  + '<rect x="2" width="2" height="2" fill="#fff"/><rect y="2" width="2" height="2" fill="#fff"/>'
+  + '</pattern></defs>'
+  + '<rect x="1.5" y="1" width="1.6" height="19" fill="#1a1a1a"/>'
+  + '<path d="M3.1 1 L16 4.6 L3.1 8.2 Z" fill="url(#chk)" stroke="#111" stroke-width="0.8"/>'
+  + '</svg>',
+);
 
 /**
  * Manages GPS track overlays as Cesium entities: one polyline per segment
@@ -60,9 +102,8 @@ export class GpsTrackOverlay {
     if (!bounds) throw new Error('Track has no usable points to display');
 
     const id = `gps-track-${this._nextId++}`;
-    const color = nextColor();
-    const cesiumColor = Cesium.Color.fromCssColorString(color);
-    const entities = [];
+    const color = opts.color || nextColor();
+    const lineEntities = [];
 
     parsed.segments.forEach((seg, segIdx) => {
       if (seg.length < 2) return; // a lone point can't draw a line; still counted in bounds/pointCount
@@ -75,53 +116,150 @@ export class GpsTrackOverlay {
         polyline: {
           positions,
           width: 4,
-          material: cesiumColor.withAlpha(0.9),
+          material: Cesium.Color.fromCssColorString(color).withAlpha(0.9),
           clampToGround: false,
           arcType: Cesium.ArcType.GEODESIC,
         },
       });
-      entities.push(entity);
+      lineEntities.push(entity);
 
       // Small point markers at the segment's start/end so a break in the
       // track (vs. a continuous line) is visible at a glance.
       const start = seg[0];
       const end = seg[seg.length - 1];
-      entities.push(this.viewer.entities.add({
+      lineEntities.push(this.viewer.entities.add({
         id: `${id}-seg-${segIdx}-start`,
         position: Cesium.Cartesian3.fromDegrees(start.lon, start.lat, start.ele || 0),
-        point: { pixelSize: 6, color: cesiumColor, outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
+        point: { pixelSize: 6, color: Cesium.Color.fromCssColorString(color), outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
       }));
-      entities.push(this.viewer.entities.add({
+      lineEntities.push(this.viewer.entities.add({
         id: `${id}-seg-${segIdx}-end`,
         position: Cesium.Cartesian3.fromDegrees(end.lon, end.lat, end.ele || 0),
-        point: { pixelSize: 6, color: cesiumColor, outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
+        point: { pixelSize: 6, color: Cesium.Color.fromCssColorString(color), outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
       }));
     });
 
-    if (!entities.length) {
+    if (!lineEntities.length) {
       throw new Error('Track has no segment with 2+ points to draw a line for');
     }
+
+    const flagEntities = this._buildFlagEntities(id, parsed.segments);
 
     const record = {
       id,
       name: parsed.name,
       color,
       visible: true,
+      flagsVisible: true,
       source: opts.sourceLabel || parsed.name,
       bounds,
       pointCount: bounds.pointCount,
       segmentCount: parsed.segments.length,
-      entities,
+      lineEntities,
+      flagEntities,
+      get entities() { return [...lineEntities, ...flagEntities]; },
     };
     this.tracks.set(id, record);
     return { id, name: record.name, color, bounds, pointCount: record.pointCount, segmentCount: record.segmentCount };
   }
 
+  /**
+   * Start (green), end (checkered), and every-100m/every-2min interval
+   * flags for a track, computed by `trackFlags` — see the module doc
+   * comment for why distance and time intervals are separate marker sets.
+   */
+  _buildFlagEntities(id, segments) {
+    const { start, end, distanceFlags, timeFlags } = trackFlags(segments);
+    const entities = [];
+    const heightOf = (p) => (Number.isFinite(p.ele) ? p.ele : 0);
+
+    if (start) {
+      entities.push(this.viewer.entities.add({
+        id: `${id}-flag-start`,
+        position: Cesium.Cartesian3.fromDegrees(start.lon, start.lat, heightOf(start)),
+        billboard: { image: START_FLAG_ICON, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, scale: 1 },
+        label: {
+          text: 'START', font: 'bold 11px sans-serif', fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(10, -18),
+        },
+      }));
+    }
+    if (end) {
+      entities.push(this.viewer.entities.add({
+        id: `${id}-flag-end`,
+        position: Cesium.Cartesian3.fromDegrees(end.lon, end.lat, heightOf(end)),
+        billboard: { image: END_FLAG_ICON, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, scale: 1 },
+        label: {
+          text: 'END', font: 'bold 11px sans-serif', fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(10, -18),
+        },
+      }));
+    }
+    const distanceIcon = intervalFlagIcon('#00d4ff');
+    distanceFlags.forEach((flag, i) => {
+      entities.push(this.viewer.entities.add({
+        id: `${id}-flag-dist-${i}`,
+        position: Cesium.Cartesian3.fromDegrees(flag.point.lon, flag.point.lat, heightOf(flag.point)),
+        billboard: { image: distanceIcon, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, scale: 0.85 },
+        label: {
+          text: `${flag.meters} m`, font: '10px sans-serif', fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK, outlineWidth: 2, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(9, -14),
+          scaleByDistance: new Cesium.NearFarScalar(500, 1, 20000, 0.5),
+        },
+      }));
+    });
+    const timeIcon = intervalFlagIcon('#ffd60a');
+    timeFlags.forEach((flag, i) => {
+      entities.push(this.viewer.entities.add({
+        id: `${id}-flag-time-${i}`,
+        position: Cesium.Cartesian3.fromDegrees(flag.point.lon, flag.point.lat, heightOf(flag.point)),
+        billboard: { image: timeIcon, verticalOrigin: Cesium.VerticalOrigin.TOP, scale: 0.85 },
+        label: {
+          text: `${flag.minutes} min`, font: '10px sans-serif', fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK, outlineWidth: 2, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.TOP, pixelOffset: new Cesium.Cartesian2(9, 14),
+          scaleByDistance: new Cesium.NearFarScalar(500, 1, 20000, 0.5),
+        },
+      }));
+    });
+    return entities;
+  }
+
   removeTrack(id) {
     const record = this.tracks.get(id);
     if (!record) return;
-    record.entities.forEach((e) => this.viewer.entities.remove(e));
+    record.lineEntities.forEach((e) => this.viewer.entities.remove(e));
+    record.flagEntities.forEach((e) => this.viewer.entities.remove(e));
     this.tracks.delete(id);
+  }
+
+  /** Recolor an already-loaded track's line and start/end point markers. */
+  setColor(id, hexColor) {
+    const record = this.tracks.get(id);
+    if (!record || !hexColor) return;
+    const cesiumColor = Cesium.Color.fromCssColorString(hexColor);
+    record.lineEntities.forEach((e) => {
+      if (e.polyline) e.polyline.material = cesiumColor.withAlpha(0.9);
+      if (e.point) e.point.color = cesiumColor;
+    });
+    record.color = hexColor;
+  }
+
+  /** Show/hide a track's start/end/interval flags independent of the line itself. */
+  setFlagsVisible(id, visible) {
+    const record = this.tracks.get(id);
+    if (!record) return;
+    record.flagsVisible = visible;
+    record.flagEntities.forEach((e) => { e.show = record.visible && visible; });
+  }
+
+  toggleFlagsVisible(id) {
+    const record = this.tracks.get(id);
+    if (!record) return;
+    this.setFlagsVisible(id, !record.flagsVisible);
   }
 
   removeAll() {
@@ -132,7 +270,10 @@ export class GpsTrackOverlay {
     const record = this.tracks.get(id);
     if (!record) return;
     record.visible = visible;
-    record.entities.forEach((e) => { e.show = visible; });
+    record.lineEntities.forEach((e) => { e.show = visible; });
+    // A hidden track hides its flags too, but showing the track again only
+    // restores flags if they weren't separately hidden via setFlagsVisible.
+    record.flagEntities.forEach((e) => { e.show = visible && record.flagsVisible; });
   }
 
   toggleVisible(id) {
@@ -161,7 +302,7 @@ export class GpsTrackOverlay {
 
   list() {
     return [...this.tracks.values()].map((r) => ({
-      id: r.id, name: r.name, color: r.color, visible: r.visible, source: r.source,
+      id: r.id, name: r.name, color: r.color, visible: r.visible, flagsVisible: r.flagsVisible, source: r.source,
       bounds: r.bounds, pointCount: r.pointCount, segmentCount: r.segmentCount,
     }));
   }

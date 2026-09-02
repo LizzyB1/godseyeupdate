@@ -14,6 +14,7 @@ import {
   looksLikeNmea,
   parseTrackFile,
   trackBounds,
+  trackFlags,
 } from './gpsTrackParse.js';
 
 // ── GPX parsing ────────────────────────────────────────────────────────────
@@ -251,4 +252,60 @@ test('trackBounds computes bbox/center/counts across all segments', () => {
 test('trackBounds returns null for an empty track', () => {
   assert.equal(trackBounds([]), null);
   assert.equal(trackBounds([[]]), null);
+});
+
+// ── trackFlags (start/end + distance/time interval markers) ────────────────
+
+/** Same-longitude points sit on a meridian (a great circle), so consecutive
+ * haversine distance is exactly EARTH_RADIUS_M * dLatRadians — lets the test
+ * build a fixture with an exactly-known per-step distance. */
+const EARTH_RADIUS_M = 6371000;
+function metersToLatDeg(meters) {
+  return ((meters / EARTH_RADIUS_M) * 180) / Math.PI;
+}
+
+test('trackFlags places a distance flag every N meters along a straight line', () => {
+  const stepDeg = metersToLatDeg(40); // ~40 m between consecutive points
+  const seg = Array.from({ length: 10 }, (_, i) => ({ lat: i * stepDeg, lon: 0 }));
+  const { distanceFlags } = trackFlags([seg], { distanceStepM: 100 });
+  // ~360 m total (9 steps * 40 m) crosses 100/200/300 but not 400.
+  assert.equal(distanceFlags.length, 3);
+  assert.deepEqual(distanceFlags.map((f) => f.meters), [100, 200, 300]);
+});
+
+test('trackFlags places a time flag every N minutes using point timestamps', () => {
+  const base = new Date('2026-01-01T00:00:00Z').getTime();
+  const seg = Array.from({ length: 9 }, (_, i) => ({
+    lat: i * 0.0001, lon: 0, time: new Date(base + i * 30_000), // 30s apart
+  }));
+  const { timeFlags } = trackFlags([seg], { timeStepMs: 2 * 60 * 1000 });
+  // 8 steps * 30s = 240s = 4 min total -> crosses the 2min and 4min marks.
+  assert.equal(timeFlags.length, 2);
+  assert.deepEqual(timeFlags.map((f) => f.minutes), [2, 4]);
+});
+
+test('trackFlags resets distance/time accumulators at a segment break', () => {
+  const stepDeg = metersToLatDeg(60);
+  const segA = Array.from({ length: 3 }, (_, i) => ({ lat: i * stepDeg, lon: 0 })); // ~120 m
+  const segB = Array.from({ length: 3 }, (_, i) => ({ lat: 10 + i * stepDeg, lon: 0 })); // another ~120 m, far away
+  const { distanceFlags } = trackFlags([segA, segB], { distanceStepM: 100 });
+  // Each segment independently crosses one 100 m flag — if the break didn't
+  // reset the accumulator, segB would start "already past" 100 m and behave
+  // differently (still 1 flag here either way, but the count must stay 2
+  // total: one per segment, not bridged into a single 240 m run).
+  assert.equal(distanceFlags.length, 2);
+});
+
+test('trackFlags reports the overall start and end across all segments', () => {
+  const segments = [
+    [{ lat: 1, lon: 1 }, { lat: 2, lon: 2 }],
+    [{ lat: 3, lon: 3 }, { lat: 4, lon: 4 }],
+  ];
+  const { start, end } = trackFlags(segments);
+  assert.deepEqual(start, { lat: 1, lon: 1 });
+  assert.deepEqual(end, { lat: 4, lon: 4 });
+});
+
+test('trackFlags handles an empty track without throwing', () => {
+  assert.deepEqual(trackFlags([]), { start: null, end: null, distanceFlags: [], timeFlags: [] });
 });
