@@ -379,11 +379,6 @@
         <span class="pp-icon">&#x25A3;</span>
         <span class="pp-label">DETECT</span>
       </button>
-      <div class="pp-slider-row detection-slider-row" id="detection-slider-row">
-        <label class="pp-slider-mini-label" for="detection-density-slider">Density</label>
-        <input type="range" class="pp-slider" id="detection-density-slider" min="0" max="100" step="25" value="50" aria-label="Detection label density" />
-        <span class="pp-slider-value" id="detection-density-value">50%</span>
-      </div>
       <div class="pp-slider-row detection-allocation-row" id="detection-allocation-row">
         <span class="pp-slider-mini-label">Allocation</span>
         <div class="pp-mode-seg detection-allocation-seg" role="radiogroup" aria-label="Detection label allocation">
@@ -413,9 +408,9 @@
     </div>
     <div class="pp-toggle-group">
       <!-- 3D aircraft is DEFAULT-ON in Proximity (product invariant 2026-08-22), so the
-           button ships lit and the mode row ships open — the same markup-carries-the-default
-           convention as #scope-toggle. ui.js re-syncs both from durable layer state, which
-           is what flips them back for a share link or a stored session carrying 3D off. -->
+           button ships lit and the mode row ships open — markup carries the default.
+           ui.js re-syncs both from durable layer state, which is what flips them back
+           for a share link or a stored session carrying 3D off. -->
       <button class="pp-toggle-btn active" id="models3d-toggle" aria-pressed="true" title="3D aircraft — flat icons zoomed out, 3D models up close">
         <span class="pp-icon">&#x2708;</span>
         <span class="pp-label">3D</span>
@@ -429,22 +424,6 @@
       </div>
     </div>
     <div class="pp-toggle-group">
-      <button class="pp-toggle-btn" id="scope-toggle" title="Scope — the circular viewport mask (off by default; displays render fullscreen)" aria-pressed="false">
-        <span class="pp-icon material-symbols-outlined" aria-hidden="true">adjust</span>
-        <span class="pp-label">Scope</span>
-      </button>
-      <div class="pp-slider-row visible" id="scope-slider-row">
-        <span class="pp-slider-mini-label">Feather</span>
-        <!-- Feather starts at an 11% soft scope-mask edge (final value
-             2026-08-24, superseding the 08-22 hard-crop and 08-23 8% rulings);
-             mirrors SCOPE_FEATHER_RATIO_DEFAULT in src/scopeMask.js. Feather
-             softens the black mask edge; label fading is the separate Fade
-             slider. -->
-        <input type="range" class="pp-slider" id="scope-feather-slider" min="0" max="100" value="11" title="Scope edge feather as a percentage of the keyhole radius" />
-        <span class="pp-slider-value" id="scope-feather-value">11%</span>
-      </div>
-    </div>
-    <div class="pp-toggle-group">
       <button class="pp-toggle-btn" id="celestial-toggle" title="Celestial ring — reveal the full globe" aria-pressed="false">
         <span class="pp-icon material-symbols-outlined" aria-hidden="true">flare</span>
         <span class="pp-label">Celestial</span>
@@ -454,26 +433,6 @@
       <span class="pp-icon">&#x25A1;</span>
       <span class="pp-label">Clean UI</span>
     </button>
-    <div class="pp-toggle-group">
-      <button class="pp-toggle-btn" id="bloom-toggle" title="Bloom / Glow">
-        <span class="pp-icon">&#x2728;</span>
-        <span class="pp-label">Bloom</span>
-      </button>
-      <div class="pp-slider-row" id="bloom-slider-row">
-        <input type="range" class="pp-slider" id="bloom-intensity-slider" min="0" max="200" value="0" />
-        <span class="pp-slider-value" id="bloom-intensity-value">0%</span>
-      </div>
-    </div>
-    <div class="pp-toggle-group">
-      <button class="pp-toggle-btn" id="sharpen-toggle" title="Sharpening">
-        <span class="pp-icon">&#x1F50D;</span>
-        <span class="pp-label">Sharpen</span>
-      </button>
-      <div class="pp-slider-row" id="sharpen-slider-row">
-        <input type="range" class="pp-slider" id="sharpen-intensity-slider" min="0" max="100" value="49" />
-        <span class="pp-slider-value" id="sharpen-intensity-value">49%</span>
-      </div>
-    </div>
   </div>
   <button id="clean-view-exit" title="Return UI controls">EXIT CLEAN VIEW</button>
 

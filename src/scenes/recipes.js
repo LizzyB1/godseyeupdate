@@ -17,8 +17,6 @@ export const SCENE_RECIPES = [
       traffic: false,
     },
     post: {
-      bloom: 62,
-      sharpen: true,
       detectionMode: 'OFF',
     },
     cameraPath: [
@@ -42,8 +40,6 @@ export const SCENE_RECIPES = [
       traffic: false,
     },
     post: {
-      bloom: 58,
-      sharpen: false,
       detectionMode: 'SPARSE',
       styleParams: {
         surveillance: {
@@ -75,8 +71,6 @@ export const SCENE_RECIPES = [
       traffic: false,
     },
     post: {
-      bloom: 72,
-      sharpen: true,
       detectionMode: 'OFF',
       styleParams: {
         thermal: {
@@ -107,8 +101,6 @@ export const SCENE_RECIPES = [
       traffic: true,
     },
     post: {
-      bloom: 65,
-      sharpen: true,
       detectionMode: 'PANOPTIC',
       styleParams: {
         surveillance: {
@@ -140,8 +132,6 @@ export const SCENE_RECIPES = [
       traffic: true,
     },
     post: {
-      bloom: 68,
-      sharpen: true,
       detectionMode: 'SPARSE',
       styleParams: {
         retro: {

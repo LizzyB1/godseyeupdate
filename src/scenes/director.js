@@ -15,11 +15,6 @@
 import * as Cesium from 'cesium';
 import { SCENE_RECIPES } from './recipes.js';
 import { sceneLayerPlan, sceneRequiresContextModeExit } from './scenePolicy.js';
-import {
-  BLOOM_INTENSITY_DEFAULT,
-  BLOOM_SCALE_VERSION,
-  decodeBloomIntensity,
-} from '../bloom.js';
 
 /** @constant {string} Key code used to abort a running scene */
 const ESCAPE_KEY = 'Escape';
@@ -76,34 +71,6 @@ function normalizeLayerEntry(entry) {
 }
 
 /**
- * Normalize a raw bloom post-processing state, migrating intensity values
- * across bloom scale versions so older saved projects render correctly.
- * @param {Object} rawBloom - Raw bloom state from storage or recipe
- * @param {Object} [options]
- * @param {number} [options.projectVersion] - Schema version of the source project
- * @param {number} [options.fallbackIntensity] - Default intensity if not stored
- * @returns {{ enabled: boolean, intensity: number, version: number }}
- */
-function normalizeBloomState(rawBloom = {}, { projectVersion = PROJECT_VERSION, fallbackIntensity = 50 } = {}) {
-  // Determine which bloom scale the stored value was encoded under.
-  // Older projects (version < PROJECT_VERSION) used scale version 1.
-  const explicitVersion = Number(rawBloom.version);
-  const bloomVersion = Number.isFinite(explicitVersion)
-    ? explicitVersion
-    : (projectVersion >= PROJECT_VERSION ? BLOOM_SCALE_VERSION : 1);
-
-  const rawIntensity = Number.isFinite(Number(rawBloom.intensity))
-    ? Number(rawBloom.intensity)
-    : fallbackIntensity;
-
-  return {
-    enabled: !!rawBloom.enabled,
-    intensity: decodeBloomIntensity(rawIntensity, bloomVersion),
-    version: BLOOM_SCALE_VERSION,
-  };
-}
-
-/**
  * Convert a static scene recipe (from recipes.js) into a mutable scene object
  * with fully normalized shots. Each keyframe in the recipe's cameraPath becomes
  * one shot, inheriting the recipe's style, post, and layer configuration.
@@ -145,17 +112,6 @@ function recipeToScene(recipe) {
     },
     visual: {
       style: recipe.style || 'normal',
-      bloom: {
-        enabled: typeof post.bloom === 'number' ? post.bloom > 0 : !!post.bloom,
-        intensity: typeof post.bloom === 'number'
-          ? decodeBloomIntensity(post.bloom, 1)
-          : BLOOM_INTENSITY_DEFAULT,
-        version: BLOOM_SCALE_VERSION,
-      },
-      sharpen: {
-        enabled: typeof post.sharpen === 'boolean' ? post.sharpen : !!post.sharpen,
-        intensity: 65,
-      },
       hud: {
         visible: hudVisible,
         variant: hudVariant,
@@ -191,8 +147,7 @@ function createDefaultProject() {
 
 /**
  * Normalize a raw shot object from storage or capture into a fully validated
- * shape with safe defaults for every field. Handles version migration for
- * bloom intensity and coerces all numeric fields.
+ * shape with safe defaults for every field, coercing all numeric fields.
  * @param {Object} rawShot - Raw shot data (may be incomplete or from an older schema)
  * @param {number} [index=0] - Positional index used for fallback title
  * @param {Object} [options]
@@ -202,8 +157,6 @@ function createDefaultProject() {
 function normalizeShot(rawShot, index = 0, { projectVersion = PROJECT_VERSION } = {}) {
   const camera = rawShot?.camera || {};
   const visual = rawShot?.visual || {};
-  const bloom = visual.bloom || {};
-  const sharpen = visual.sharpen || {};
   const hud = visual.hud || {};
   const detection = visual.detection || {};
 
@@ -222,11 +175,6 @@ function normalizeShot(rawShot, index = 0, { projectVersion = PROJECT_VERSION } 
     },
     visual: {
       style: visual.style || 'normal',
-      bloom: normalizeBloomState(bloom, { projectVersion, fallbackIntensity: 50 }),
-      sharpen: {
-        enabled: !!sharpen.enabled,
-        intensity: Math.max(0, Math.min(100, Number.isFinite(Number(sharpen.intensity)) ? Number(sharpen.intensity) : 65)),
-      },
       hud: {
         visible: typeof hud.visible === 'boolean' ? hud.visible : true,
         variant: typeof hud.variant === 'string' ? hud.variant : 'tactical',
@@ -292,7 +240,7 @@ function normalizeProject(rawProject) {
 export class SceneDirector {
   /**
    * @param {Cesium.Viewer} viewer - The Cesium viewer instance
-   * @param {Object} styleManager - Controls visual state (bloom, sharpen, HUD, detection, style presets)
+   * @param {Object} styleManager - Controls visual state (HUD, detection, style presets)
    * @param {Object} dataManager - Manages data layer enable/disable and per-layer params
    */
   constructor(viewer, styleManager, dataManager) {
@@ -961,7 +909,7 @@ export class SceneDirector {
           index: idx,
         });
 
-        // Apply visual state (style, bloom, sharpen, HUD, detection) then layers, then fly.
+        // Apply visual state (style, HUD, detection) then layers, then fly.
         // Awaited: applyVisualState suspends on a map-stack switch, and a shot
         // captured by the operator carries one — un-awaited, its shader uniforms
         // land after the NEXT shot has already been applied.

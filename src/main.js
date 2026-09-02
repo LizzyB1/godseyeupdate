@@ -30,7 +30,6 @@ import {
   holdContinuousRender,
   releaseContinuousRender,
 } from './renderGovernor.js';
-import { installScopeMask, setScopeMaskEnabled } from './scopeMask.js';
 import { initCameraControls } from './cameraControls.js';
 import { initGpsTrackOverlay } from './data/gpsTracks.js';
 import { initGpsTrackPanel } from './gpsTrackPanel.js';
@@ -331,16 +330,6 @@ async function init() {
     // nothing animates per frame. Installed AFTER every module above has had
     // its chance to register pre-install holds. (perf wave 2)
     installRenderGovernor(viewer);
-
-    // The explicit scope mask replaces the emergent six-pass artifact —
-    // see src/scopeMask.js. Installed before the UI so the DISPLAY-rail
-    // toggle finds it live.
-    installScopeMask(viewer);
-    // Ships OFF by default: the circular keyhole crop and its edge shading
-    // no longer clip the view down from a full rectangular display — the
-    // Scope button (#scope-toggle, default markup kept in sync in index.html)
-    // still lets an operator opt back into it.
-    setScopeMaskEnabled(false);
 
     // Keyboard (WASD/arrows ground move, T/G pitch, R/F zoom) + on-screen pad
     // camera controls — horizon always locked level, no yaw-in-place or roll

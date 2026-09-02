@@ -10,8 +10,8 @@ export const GLOBE_EXIT_CLEARANCE_PX = 12;
 /** Minimum stable length of a celestial direction projected into the camera plane. */
 export const CELESTIAL_PLANE_EPSILON = 0.045;
 /** Responsive radial fade band used by every keyhole-aligned text overlay —
- * this is the Detection FADE (label/card fading), NOT the scope-mask feather
- * in scopeMask.js. 0.07 since the 2026-08-24 final value (was 0.16). */
+ * this is the Detection FADE (label/card fading). 0.07 since the
+ * 2026-08-24 final value (was 0.16). */
 export const KEYHOLE_LABEL_FEATHER_RATIO = 0.07;
 export const KEYHOLE_LABEL_FEATHER_MAX_RATIO = 0.4;
 /**

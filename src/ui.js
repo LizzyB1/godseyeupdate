@@ -5,13 +5,6 @@ import { noirShader } from './styles/noir.js';
 import { snowShader } from './styles/snow.js';
 import { nightVisionShader } from './styles/surveillance.js';
 import { thermalShader } from './styles/thermal.js';
-import {
-  BLOOM_INTENSITY_DEFAULT,
-  BLOOM_SCALE_VERSION,
-  bloomStrengthFromIntensity,
-  clampBloomIntensity,
-  decodeBloomIntensity,
-} from './bloom.js';
 import { LOCATIONS, CITY_POIS, GLOBE_VIEW, flyToGlobeView, flyToPresetLocation, flyToPOI, searchAndFlyTo } from './locations.js';
 import { locationMiniStatus } from './locationStatus.js';
 import { interruptCameraMotion } from './cameraVerbs.js';
@@ -158,15 +151,6 @@ import {
 } from './data/groundFloor.js';
 import { sampleMeshFloorCells } from './data/meshFloorSampler.js';
 import { holdContinuousRender, releaseContinuousRender, governorRequestRender } from './renderGovernor.js';
-import {
-  setScopeMaskEnabled,
-  isScopeMaskEnabled,
-  setScopeMaskFeather,
-  getScopeMaskFeather,
-  setScopeTerminusOverride,
-  getScopeTerminusOverride,
-  clampScopeTerminusPct,
-} from './scopeMask.js';
 import {
   fetchRegionalBrief,
   regionalDistanceM,
@@ -396,8 +380,6 @@ const MILITARY_DETECTION_PRESET = Object.freeze({ mode: 'dense', densityPct: 75 
 
 /** Baseline post-processing settings applied on first load (before share-link restore). */
 const GLOBAL_POST_DEFAULTS = {
-  bloom: { enabled: false, intensity: BLOOM_INTENSITY_DEFAULT },
-  sharpen: { enabled: true, intensity: 49 },
   hudVariant: 'tactical',
   hudVisible: true,
   // Detection is ON for EVERY style on a first run, Normal included (owner
@@ -422,8 +404,6 @@ const GLOBAL_POST_DEFAULTS = {
 // Tactical style defaults applied when users select military style presets.
 const STYLE_PRESET_DEFAULTS = {
   retro: {
-    bloom: { enabled: false, intensity: BLOOM_INTENSITY_DEFAULT },
-    sharpen: { enabled: true, intensity: 49 },
     styleParams: {
       retro: {
         pixelation: 1.0,
@@ -436,8 +416,6 @@ const STYLE_PRESET_DEFAULTS = {
     detection: MILITARY_DETECTION_PRESET,
   },
   surveillance: {
-    bloom: { enabled: false, intensity: BLOOM_INTENSITY_DEFAULT },
-    sharpen: { enabled: true, intensity: 49 },
     styleParams: {
       surveillance: {
         gain: 0.18,
@@ -451,8 +429,6 @@ const STYLE_PRESET_DEFAULTS = {
     detection: MILITARY_DETECTION_PRESET,
   },
   thermal: {
-    bloom: { enabled: false, intensity: BLOOM_INTENSITY_DEFAULT },
-    sharpen: { enabled: true, intensity: 49 },
     styleParams: {
       thermal: {
         sensitivity: 0.85,
@@ -504,7 +480,6 @@ const SHARPEN_SHADER = /* glsl */ `
  * Responsibilities:
  * - CesiumJS PostProcessStage pipeline: registers per-style GLSL stages
  *   (NVG, FLIR, CRT, anime, noir, snow) and manages intensity crossfades.
- * - Bloom and sharpen post-processing toggle/intensity control.
  * - Draggable/collapsible panel system with localStorage persistence,
  *   z-order stacking, and viewport-clamped positioning.
  * - CCTV panel: camera selection, coverage toggle, projection, calibration
@@ -2138,10 +2113,7 @@ export class StyleManager {
     // Gates per-style detection defaults so they never stomp an explicit choice.
     this._detectionUserOverridden = false;
 
-    // Bloom/sharpen state
-    this.bloomEnabled = false;
-    this.sharpenEnabled = false;
-    this._bloomStage = null;
+    // Sharpen stage handle (permanently on — see _initSharpen)
     this._sharpenStage = null;
     this._recordingMode = false;
     this._recordingConfig = { hidePanels: true, hudMode: 'minimal', safeFrame: '16:9' };
@@ -2229,14 +2201,6 @@ export class StyleManager {
     this._sliderPanel = document.getElementById('param-slider-panel');
     this._sliderContainer = document.getElementById('param-sliders');
     this._ppToggles = document.getElementById('pp-toggles');
-    this._bloomBtn = document.getElementById('bloom-toggle');
-    this._bloomSliderRow = document.getElementById('bloom-slider-row');
-    this._bloomSlider = document.getElementById('bloom-intensity-slider');
-    this._bloomSliderValue = document.getElementById('bloom-intensity-value');
-    this._sharpenBtn = document.getElementById('sharpen-toggle');
-    this._sharpenSliderRow = document.getElementById('sharpen-slider-row');
-    this._sharpenSlider = document.getElementById('sharpen-intensity-slider');
-    this._sharpenSliderValue = document.getElementById('sharpen-intensity-value');
     this._hudBtn = document.getElementById('hud-toggle');
     this._hudLayoutRow = document.getElementById('hud-layout-row');
     this._hudLayoutSelect = document.getElementById('hud-layout-select');
@@ -2260,9 +2224,6 @@ export class StyleManager {
     } catch { /* storage can be unavailable in privacy/test contexts */ }
     this._detectionAllocationPreference = normalizeAllocationStrategy(storedDetectionAllocation);
     this._celestialBtn = document.getElementById('celestial-toggle');
-    this._scopeBtn = document.getElementById('scope-toggle');
-    this._scopeFeatherSlider = document.getElementById('scope-feather-slider');
-    this._scopeFeatherValue = document.getElementById('scope-feather-value');
     this._mapStackChips = document.getElementById('map-stack-chips');
     this._mapStackStatus = document.getElementById('map-stack-status');
     this._cleanViewBtn = document.getElementById('clean-view-toggle');
@@ -2483,22 +2444,13 @@ export class StyleManager {
       onRestore: async (state) => {
         const {
           style,
-          bloom,
-          sharpen,
-          bloomIntensity,
-          bloomVersion,
-          sharpenIntensity,
           hudVariant,
           hudVisible,
           detectionMode,
-          detectionDensity,
           detectionAllocation,
           detectionFadePct,
           detectionOutsideOpacityPct,
           celestialRing,
-          scopeEnabled,
-          scopeFeatherPct,
-          scopeTerminusPct,
           mapStack,
           panelState,
           styleParams,
@@ -2514,28 +2466,10 @@ export class StyleManager {
           }
           this._updateSliderPanel(style, { reveal: false });
         }
-        if (typeof bloomIntensity === 'number' && this._bloomSlider) {
-          const intensity = decodeBloomIntensity(bloomIntensity, bloomVersion);
-          this._setBloomIntensity(intensity, { syncShare: false });
-        }
-        if (typeof sharpenIntensity === 'number' && this._sharpenSlider) {
-          const pct = Math.max(0, Math.min(100, Math.round(sharpenIntensity)));
-          this._sharpenSlider.value = String(pct);
-          this._sharpenSliderValue.textContent = `${pct}%`;
-          this._applySharpenIntensity(pct / 100);
-        }
-        if (typeof bloom === 'boolean') this._setBloomEnabled(bloom);
-        if (typeof sharpen === 'boolean') this._setSharpenEnabled(sharpen);
         if (hudVariant) this._setHudVariant(hudVariant);
         if (typeof hudVisible === 'boolean') {
           this.hud.setMode(hudVisible ? 'on' : 'off');
           this._updateHudButtonState();
-        }
-        if (typeof detectionDensity === 'number' && this._detectionDensitySlider) {
-          const pct = canonicalizeDensity(detectionDensity);
-          this._detectionDensitySlider.value = String(pct);
-          this._detectionDensityValue.textContent = `${pct}%`;
-          this._applyDetectionDensityFromUi();
         }
         if (detectionAllocation) {
           this._setDetectionAllocation(detectionAllocation, { syncShare: false, persist: false });
@@ -2550,24 +2484,6 @@ export class StyleManager {
         if (detectionMode) this._setDetectionMode(detectionMode);
         if (typeof celestialRing === 'boolean') {
           this.setCelestialRingEnabled(celestialRing, { syncShare: false, focus: false });
-        }
-        if (typeof scopeEnabled === 'boolean') {
-          setScopeMaskEnabled(scopeEnabled);
-          this._scopeBtn?.classList.toggle('active', scopeEnabled);
-          this._scopeBtn?.setAttribute('aria-pressed', String(scopeEnabled));
-        }
-        if (typeof scopeFeatherPct === 'number' && this._scopeFeatherSlider) {
-          const pct = Math.max(0, Math.min(100, Math.round(scopeFeatherPct)));
-          this._scopeFeatherSlider.value = String(pct);
-          if (this._scopeFeatherValue) this._scopeFeatherValue.textContent = `${pct}%`;
-          setScopeMaskFeather(pct / 100);
-        }
-        // null restores the altitude-adaptive ramp; a number pins the terminus
-        // (clamped to the supported 94..100 band, same as the `sce` hash key).
-        if (scopeTerminusPct === null) setScopeTerminusOverride(null);
-        else if (typeof scopeTerminusPct === 'number') {
-          const pinned = clampScopeTerminusPct(scopeTerminusPct);
-          setScopeTerminusOverride(pinned == null ? null : pinned / 100);
         }
         const mapStackRestore = mapStack
           ? this._setMapStack(mapStack, { syncShare: false })
@@ -2624,7 +2540,7 @@ export class StyleManager {
     this._applyDetectionDensityFromUi();
 
     this._initStages();
-    this._initBloomSharpen();
+    this._initSharpen();
     this._initUI();
     this._initMapStackControl();
     this._initPanelChrome();
@@ -2976,13 +2892,8 @@ export class StyleManager {
         uniforms,
       });
 
-      // Zero-intensity stages are DISABLED (perf wave 1). History: the
-      // first attempt at this deleted the product's signature scope — the
-      // circular starfield mask was an EMERGENT artifact of these six
-      // stacked "identity" passes, not an implemented feature. The owner
-      // ruled to reimplement the scope explicitly (src/scopeMask.js, a
-      // featherable zero-per-frame canvas), which frees these passes for
-      // real. If the scope ever looks wrong, look there — not here.
+      // Zero-intensity stages are DISABLED (perf wave 1) — a straight perf
+      // optimization now; these stages carry no scope/mask responsibility.
       stage.enabled = false;
       this.viewer.scene.postProcessStages.add(stage);
       this.stages[name] = stage;
@@ -2994,9 +2905,8 @@ export class StyleManager {
 
   /**
    * Single write path for style-stage intensity: keeps `enabled` in
-   * lockstep so zero-intensity stages cost nothing (safe now that the
-   * scope is explicit — see _initStages). The stage enables on the same
-   * frame the first non-zero intensity lands, so crossfades never pop.
+   * lockstep so zero-intensity stages cost nothing. The stage enables on the
+   * same frame the first non-zero intensity lands, so crossfades never pop.
    * @param {Cesium.PostProcessStage} stage - Style post-process stage.
    * @param {number} value - Intensity in [0, 1].
    * @returns {void}
@@ -3018,9 +2928,7 @@ export class StyleManager {
    * intensity math — they write `uniforms.intensity` directly and know
    * nothing about the enabled/intensity lockstep _setStageIntensity owns.
    * Without this sweep a stage the policy raised to 1 would stay DISABLED
-   * and cockpit NVG/FLIR/CRT would render nothing at all. (Inert while the
-   * chain is permanently enabled; load-bearing again once the explicit
-   * scope frees the zero-intensity stages — see _initStages.)
+   * and cockpit NVG/FLIR/CRT would render nothing at all.
    * @returns {void}
    */
   _syncStagesEnabledFromIntensity() {
@@ -3184,152 +3092,29 @@ export class StyleManager {
   }
 
   /**
-   * Configures Cesium's built-in bloom stage and adds a custom unsharp-mask
-   * sharpen stage to the post-process pipeline. Both start disabled.
+   * Adds the custom unsharp-mask sharpen stage to the post-process pipeline,
+   * permanently on at max intensity. Sharpen used to be a user-adjustable
+   * Display-panel toggle+slider (0-100%); it was de-controlled to always-on
+   * so the `amount` uniform is just hardcoded to what the old slider's max
+   * (100%) used to compute: 0.1 + (100/100)*2.0 = 2.1.
    * @returns {void}
    */
-  _initBloomSharpen() {
-    // Bloom — use Cesium's built-in bloom
-    this._bloomStage = this.viewer.scene.postProcessStages.bloom;
-    this._bloomStage.enabled = false;
-    this._bloomStage.uniforms.glowOnly = false;
-    this._bloomStage.uniforms.contrast = 256.0;
-    this._bloomStage.uniforms.brightness = -0.35;
-    this._bloomStage.uniforms.delta = 0.25;
-    this._bloomStage.uniforms.sigma = 0.35;
-    this._bloomStage.uniforms.stepSize = 1.0;
-
-    // Sharpen — custom unsharp mask PostProcessStage
+  _initSharpen() {
     this._sharpenStage = new Cesium.PostProcessStage({
       name: 'godsEyeView_sharpen',
       fragmentShader: SHARPEN_SHADER,
       uniforms: {
-        amount: 1.3,
+        amount: 2.1,
       },
     });
-    this._sharpenStage.enabled = false;
+    this._sharpenStage.enabled = true;
     this.viewer.scene.postProcessStages.add(this._sharpenStage);
-    if (this._sharpenSlider) {
-      this._applySharpenIntensity(parseInt(this._sharpenSlider.value, 10) / 100);
-    }
-  }
-
-  /**
-   * Reads the current bloom intensity percentage from the UI slider.
-   * @returns {number} Clamped bloom intensity (0-200).
-   */
-  _getBloomIntensity() {
-    return clampBloomIntensity(parseInt(this._bloomSlider?.value || `${BLOOM_INTENSITY_DEFAULT}`, 10));
-  }
-
-  /**
-   * Enables or disables the Cesium bloom stage based on both the user toggle
-   * and whether the computed strength exceeds the perceptual threshold (0.06).
-   * @returns {void}
-   */
-  _syncBloomStageEnabled() {
-    if (!this._bloomStage) return;
-    const strength = bloomStrengthFromIntensity(this._getBloomIntensity());
-    this._bloomStage.enabled = this.bloomEnabled && strength > 0.06;
-  }
-
-  /**
-   * Sets the bloom intensity, updates the slider UI, and applies the value.
-   * @param {number} intensity - Raw intensity percentage.
-   * @param {object} [options]
-   * @param {boolean} [options.syncShare=true] - Whether to push state to the share link.
-   * @returns {void}
-   */
-  _setBloomIntensity(intensity, { syncShare = true } = {}) {
-    governorRequestRender('bloom');
-    const clamped = clampBloomIntensity(intensity);
-    if (this._bloomSlider) this._bloomSlider.value = String(clamped);
-    if (this._bloomSliderValue) this._bloomSliderValue.textContent = `${clamped}%`;
-    this._applyBloomIntensity(clamped);
-    if (syncShare) this._syncShareState();
-  }
-
-  /**
-   * Maps a bloom intensity percentage to Cesium bloom stage uniforms.
-   * Uses smoothstep easing (Hermite interpolation: 3t^2 - 2t^3) to
-   * produce a perceptually linear glow ramp from zero to full strength.
-   * @param {number} intensity - Bloom intensity percentage (0-200).
-   * @returns {void}
-   */
-  _applyBloomIntensity(intensity) {
-    if (!this._bloomStage) return;
-    const rawStrength = bloomStrengthFromIntensity(intensity);
-    // Dead-zone: strengths below 0.06 are imperceptible, clamp to zero.
-    const strength = rawStrength <= 0.06 ? 0.0 : ((rawStrength - 0.06) / 0.94);
-    // Smoothstep easing for perceptually linear bloom ramp
-    const eased = strength * strength * (3.0 - 2.0 * strength);
-
-    // Mapping tuned for intuitive UX:
-    // 0 => effectively no glow, 200 => strong glow.
-    // Keep threshold strict at low values so only very bright highlights bloom.
-    this._bloomStage.uniforms.contrast = 255.0 - (eased * 168.0);
-    this._bloomStage.uniforms.brightness = -0.5 + (eased * 0.36);
-    this._bloomStage.uniforms.sigma = 0.28 + (eased * 6.3);
-    this._bloomStage.uniforms.delta = 0.2 + (eased * 2.25);
-    this._bloomStage.uniforms.stepSize = 1.0 + (eased * 1.25);
-    this._syncBloomStageEnabled();
-  }
-
-  /**
-   * Toggles bloom on/off, syncs button state, and reveals/hides the intensity slider row.
-   * @param {boolean} enabled - Whether bloom should be active.
-   * @returns {void}
-   */
-  _setBloomEnabled(enabled) {
-    governorRequestRender('bloom');
-    this.bloomEnabled = !!enabled;
-    this._syncBloomStageEnabled();
-    this._bloomBtn.classList.toggle('active', this.bloomEnabled);
-    this._bloomSliderRow.classList.toggle('visible', this.bloomEnabled);
-    if (this.bloomEnabled) {
-      this._applyBloomIntensity(this._getBloomIntensity());
-    }
-    this._syncShareState();
-    this._layoutRightPanels();
-  }
-
-  /**
-   * Maps a normalized sharpen value (0-1) to the unsharp-mask `amount` uniform.
-   * Range: 0.1 (subtle) to 2.1 (aggressive edge enhancement).
-   * @param {number} val - Normalized sharpen intensity (0.0 to 1.0).
-   * @returns {void}
-   */
-  _applySharpenIntensity(val) {
-    governorRequestRender('sharpen');
-    if (!this._sharpenStage || !this._sharpenStage.uniforms) return;
-    this._sharpenStage.uniforms.amount = 0.1 + val * 2.0;
-  }
-
-  /**
-   * Toggles sharpening on/off, syncs button state, and reveals/hides the intensity slider row.
-   * @param {boolean} enabled - Whether sharpening should be active.
-   * @returns {void}
-   */
-  _setSharpenEnabled(enabled) {
-    governorRequestRender('sharpen');
-    this.sharpenEnabled = !!enabled;
-    this._sharpenStage.enabled = this.sharpenEnabled;
-    this._sharpenBtn.classList.toggle('active', this.sharpenEnabled);
-    if (this._sharpenSliderRow) {
-      this._sharpenSliderRow.classList.toggle('visible', this.sharpenEnabled);
-    }
-    if (this.sharpenEnabled && this._sharpenSlider) {
-      this._applySharpenIntensity(parseInt(this._sharpenSlider.value, 10) / 100);
-    }
-    this._syncShareState();
-    this._layoutRightPanels();
   }
 
   /**
    * Wires up all primary UI event listeners: style buttons, keyboard shortcuts
    * (1-8 style keys, H/O/V/F/D/C hotkeys, Escape), AI prompt input with
-   * debounce, bloom/sharpen/HUD toggles, detection density slider, and
-   * clean-view toggle.
+   * debounce, HUD toggle, and clean-view toggle.
    * @returns {void}
    */
   _initUI() {
@@ -3383,54 +3168,6 @@ export class StyleManager {
       }
     };
     document.addEventListener('keydown', this._globalKeydownHandler);
-
-    // Bloom toggle
-    this._bloomBtn.addEventListener('click', () => {
-      this.shareLinkManager?.claimRestoreLane?.('visual');
-      this._setBloomEnabled(!this.bloomEnabled);
-    });
-
-    // Bloom intensity slider
-    this._bloomSlider.addEventListener('input', () => {
-      this.shareLinkManager?.claimRestoreLane?.('visual');
-      this._setBloomIntensity(parseInt(this._bloomSlider.value, 10));
-    });
-
-    // Sharpen toggle
-    this._sharpenBtn.addEventListener('click', () => {
-      this.shareLinkManager?.claimRestoreLane?.('visual');
-      this._setSharpenEnabled(!this.sharpenEnabled);
-    });
-
-    // Scope mask — the explicit circular viewport treatment (owner ask:
-    // standalone toggle + featherable edge; see src/scopeMask.js).
-    this._scopeBtn?.addEventListener('click', () => {
-      this.shareLinkManager?.claimRestoreLane?.('visual');
-      const next = !isScopeMaskEnabled();
-      setScopeMaskEnabled(next);
-      this._scopeBtn.classList.toggle('active', next);
-      this._scopeBtn.setAttribute('aria-pressed', String(next));
-      this._syncShareState();
-    });
-    this._scopeFeatherSlider?.addEventListener('input', () => {
-      this.shareLinkManager?.claimRestoreLane?.('visual');
-      const pct = Math.max(0, Math.min(100, parseInt(this._scopeFeatherSlider.value, 10) || 0));
-      if (this._scopeFeatherValue) this._scopeFeatherValue.textContent = `${pct}%`;
-      setScopeMaskFeather(pct / 100);
-      this._syncShareState();
-    });
-
-    if (this._sharpenSlider) {
-      this._sharpenSlider.addEventListener('input', () => {
-        this.shareLinkManager?.claimRestoreLane?.('visual');
-        const pct = parseInt(this._sharpenSlider.value, 10);
-        if (this._sharpenSliderValue) {
-          this._sharpenSliderValue.textContent = `${pct}%`;
-        }
-        this._applySharpenIntensity(pct / 100);
-        this._syncShareState();
-      });
-    }
 
     if (this._hudLayoutSelect) {
       this._hudLayoutSelect.addEventListener('change', () => {
@@ -3661,8 +3398,8 @@ export class StyleManager {
   }
 
   /**
-   * Applies preset defaults (bloom, sharpen, shader uniforms, HUD variant)
-   * when a military-class style (CRT, NVG, FLIR) is selected. Does nothing
+   * Applies preset defaults (shader uniforms, HUD variant) when a
+   * military-class style (CRT, NVG, FLIR) is selected. Does nothing
    * for styles without entries in STYLE_PRESET_DEFAULTS.
    * @param {string} styleName - The style whose defaults to apply.
    * @returns {void}
@@ -3681,25 +3418,6 @@ export class StyleManager {
           governorRequestRender('style-param');
         }
       }
-    }
-
-    const bloomInput = preset.bloom || {};
-    if (typeof bloomInput.intensity === 'number' && this._bloomSlider) {
-      this._setBloomIntensity(clampBloomIntensity(bloomInput.intensity), { syncShare: false });
-    }
-    if (typeof bloomInput.enabled === 'boolean') {
-      this._setBloomEnabled(bloomInput.enabled);
-    }
-
-    const sharpenInput = preset.sharpen || {};
-    if (typeof sharpenInput.intensity === 'number' && this._sharpenSlider) {
-      const sharpenPct = Math.max(0, Math.min(100, Math.round(sharpenInput.intensity)));
-      this._sharpenSlider.value = String(sharpenPct);
-      this._sharpenSliderValue.textContent = `${sharpenPct}%`;
-      this._applySharpenIntensity(sharpenPct / 100);
-    }
-    if (typeof sharpenInput.enabled === 'boolean') {
-      this._setSharpenEnabled(sharpenInput.enabled);
     }
 
     if (preset.hudVariant) {
@@ -3742,29 +3460,12 @@ export class StyleManager {
 
   /**
    * Applies the global post-processing baseline (GLOBAL_POST_DEFAULTS) at
-   * startup before any share-link restore runs. Sets bloom, sharpen, HUD,
-   * and detection to their factory defaults.
+   * startup before any share-link restore runs. Sets HUD and detection to
+   * their factory defaults.
    * @returns {void}
    */
   _applyGlobalPostDefaults() {
     const defaults = GLOBAL_POST_DEFAULTS;
-    if (typeof defaults.bloom?.intensity === 'number' && this._bloomSlider) {
-      this._setBloomIntensity(clampBloomIntensity(defaults.bloom.intensity), { syncShare: false });
-    }
-    if (typeof defaults.bloom?.enabled === 'boolean') {
-      this._setBloomEnabled(defaults.bloom.enabled);
-    }
-
-    if (typeof defaults.sharpen?.intensity === 'number' && this._sharpenSlider) {
-      const sharpenPct = Math.max(0, Math.min(100, Math.round(defaults.sharpen.intensity)));
-      this._sharpenSlider.value = String(sharpenPct);
-      this._sharpenSliderValue.textContent = `${sharpenPct}%`;
-      this._applySharpenIntensity(sharpenPct / 100);
-    }
-    if (typeof defaults.sharpen?.enabled === 'boolean') {
-      this._setSharpenEnabled(defaults.sharpen.enabled);
-    }
-
     if (defaults.hudVariant) {
       this._setHudVariant(defaults.hudVariant);
     }
@@ -3799,11 +3500,6 @@ export class StyleManager {
   }
 
   /**
-   * Pushes the current visual state (bloom, sharpen, HUD, detection) to
-   * the ShareLinkManager so the URL hash stays in sync.
-   * @returns {void}
-   */
-  /**
    * Detection as a DURABLE preference, for serialization into a share link.
    *
    * While Contacts is active it OWNS detection and forces Dense @ 75%. That is
@@ -3824,12 +3520,14 @@ export class StyleManager {
     });
   }
 
+  /**
+   * Pushes the current visual state (HUD, detection) to the ShareLinkManager
+   * so the URL hash stays in sync.
+   * @returns {void}
+   */
   _syncShareState() {
     const detection = this._shareableDetectionState();
-    this.shareLinkManager.onToggleChange(this.bloomEnabled, this.sharpenEnabled, {
-      bloomIntensity: this._getBloomIntensity(),
-      bloomVersion: BLOOM_SCALE_VERSION,
-      sharpenIntensity: parseInt(this._sharpenSlider?.value || '49', 10),
+    this.shareLinkManager.onToggleChange({
       hudVariant: this.hud.getVariant(),
       hudVisible: this.hud.visible,
       detectionMode: detection.mode,
@@ -3838,12 +3536,6 @@ export class StyleManager {
       detectionFadePct: parseInt(this._detectionFadeSlider?.value || '7', 10),
       detectionOutsideOpacityPct: parseInt(this._detectionOpacitySlider?.value || '1', 10),
       celestialRingEnabled: this.celestialRingEnabled,
-      scopeEnabled: isScopeMaskEnabled(),
-      scopeFeatherPct: Math.round(getScopeMaskFeather() * 100),
-      // null when adaptive — the share layer omits `sce` entirely in that case.
-      scopeTerminusPct: getScopeTerminusOverride() == null
-        ? null
-        : Math.round(getScopeTerminusOverride() * 100),
       mapStack: this.mapStackController?.getActiveId?.() || 'photoreal',
     });
   }
@@ -7964,72 +7656,6 @@ export class StyleManager {
     };
   }
 
-  /**
-   * Controls bloom post-processing. Intensity is the UI percent (0-200).
-   * @param {object} [options]
-   * @param {boolean} [options.enabled]
-   * @param {number} [options.intensityPct] - 0-200.
-   * @returns {{ok: boolean, bloom: {enabled: boolean, intensityPct: number|null}}}
-   */
-  setBloom({ enabled, intensityPct } = {}) {
-    const current = () => ({
-      enabled: !!this.bloomEnabled,
-      intensityPct: this._bloomSlider ? parseInt(this._bloomSlider.value, 10) : null,
-    });
-    if (enabled !== undefined && typeof enabled !== 'boolean') {
-      return { ok: false, error: `Invalid bloom enabled value: ${enabled}`, bloom: current() };
-    }
-    if (intensityPct !== undefined
-      && (typeof intensityPct !== 'number' || !Number.isFinite(intensityPct))) {
-      return { ok: false, error: `Invalid bloom intensity: ${intensityPct}`, bloom: current() };
-    }
-    const hasExplicitVisualChange = intensityPct !== undefined || enabled !== undefined;
-    if (hasExplicitVisualChange) this.shareLinkManager?.claimRestoreLane?.('visual');
-    if (intensityPct !== undefined) {
-      this._setBloomIntensity(Math.round(Math.max(0, Math.min(200, intensityPct))));
-    }
-    if (enabled !== undefined) this._setBloomEnabled(enabled);
-    return {
-      ok: true,
-      bloom: current(),
-    };
-  }
-
-  /**
-   * Controls sharpen post-processing. Intensity is the UI percent (0-100).
-   * @param {object} [options]
-   * @param {boolean} [options.enabled]
-   * @param {number} [options.intensityPct] - 0-100.
-   * @returns {{ok: boolean, sharpen: {enabled: boolean, intensityPct: number|null}}}
-   */
-  setSharpen({ enabled, intensityPct } = {}) {
-    const current = () => ({
-      enabled: !!this.sharpenEnabled,
-      intensityPct: this._sharpenSlider ? parseInt(this._sharpenSlider.value, 10) : null,
-    });
-    if (enabled !== undefined && typeof enabled !== 'boolean') {
-      return { ok: false, error: `Invalid sharpen enabled value: ${enabled}`, sharpen: current() };
-    }
-    if (intensityPct !== undefined
-      && (typeof intensityPct !== 'number' || !Number.isFinite(intensityPct))) {
-      return { ok: false, error: `Invalid sharpen intensity: ${intensityPct}`, sharpen: current() };
-    }
-    const hasExplicitVisualChange = intensityPct !== undefined || enabled !== undefined;
-    if (hasExplicitVisualChange) this.shareLinkManager?.claimRestoreLane?.('visual');
-    if (intensityPct !== undefined) {
-      const pct = Math.round(Math.max(0, Math.min(100, intensityPct)));
-      if (this._sharpenSlider) this._sharpenSlider.value = String(pct);
-      if (this._sharpenSliderValue) this._sharpenSliderValue.textContent = `${pct}%`;
-      this._applySharpenIntensity(pct / 100);
-      this._syncShareState();
-    }
-    if (enabled !== undefined) this._setSharpenEnabled(enabled);
-    return {
-      ok: true,
-      sharpen: current(),
-    };
-  }
-
   /** Whether the full-globe celestial overlay is enabled by user preference. */
   get celestialRingEnabled() {
     return !!this.celestialRing?.enabled;
@@ -8510,7 +8136,7 @@ export class StyleManager {
   /**
    * Full control-state snapshot — single source for voice read-back so the
    * agent confirms from the same state it acted on.
-   * @returns {object} Current style/stack/HUD/detection/post-processing state.
+   * @returns {object} Current style/stack/HUD/detection state.
    */
   getControlState() {
     return {
@@ -8518,14 +8144,6 @@ export class StyleManager {
       mapStack: this.mapStackController?.getActiveId?.() || null,
       hud: { visible: !!this.hud?.visible, layout: this.hud?.getVariant?.() || null },
       detection: this.getDetectionState(),
-      bloom: {
-        enabled: !!this.bloomEnabled,
-        intensityPct: this._bloomSlider ? parseInt(this._bloomSlider.value, 10) : null,
-      },
-      sharpen: {
-        enabled: !!this.sharpenEnabled,
-        intensityPct: this._sharpenSlider ? parseInt(this._sharpenSlider.value, 10) : null,
-      },
       celestialRing: {
         enabled: this.celestialRingEnabled,
         visible: !!this.celestialRing?.visible,
@@ -8578,7 +8196,7 @@ export class StyleManager {
   }
 
   /**
-   * Snapshots the full visual state (active style, bloom, sharpen, HUD, detection,
+   * Snapshots the full visual state (active style, HUD, detection,
    * per-style shader uniform values) for serialization or scene recipe capture.
    * @returns {object} Serializable visual state object.
    */
@@ -8595,15 +8213,6 @@ export class StyleManager {
 
     return {
       style: this.activeStyle,
-      bloom: {
-        enabled: this.bloomEnabled,
-        intensity: this._getBloomIntensity(),
-        version: BLOOM_SCALE_VERSION,
-      },
-      sharpen: {
-        enabled: this.sharpenEnabled,
-        intensity: parseInt(this._sharpenSlider?.value || '49', 10),
-      },
       hud: {
         visible: this.hud.visible,
         variant: this.hud.getVariant(),
@@ -8615,18 +8224,14 @@ export class StyleManager {
         fadePct: parseInt(this._detectionFadeSlider?.value || '7', 10),
         outsideOpacityPct: parseInt(this._detectionOpacitySlider?.value || '0', 10),
       },
-      scope: {
-        enabled: isScopeMaskEnabled(),
-        featherPct: Math.round(getScopeMaskFeather() * 100),
-      },
       mapStack: this.mapStackController?.getActiveId?.() || 'photoreal',
       styleParams,
     };
   }
 
   /**
-   * Restores a full visual state snapshot, applying style, bloom, sharpen,
-   * HUD, detection, and per-style shader uniforms. Used by scene recipes
+   * Restores a full visual state snapshot, applying style, HUD, detection,
+   * and per-style shader uniforms. Used by scene recipes
    * and share-link restore. Async so the map-stack switch resolves before
    * the share state is synced; callers may fire-and-forget.
    * @param {object} [state={}] - Visual state object (as returned by getVisualState).
@@ -8648,29 +8253,6 @@ export class StyleManager {
       this.setStyle(state.style, { applyPreset: false });
     }
 
-    const bloomState = state.bloom || {};
-    if (typeof bloomState.intensity === 'number' && this._bloomSlider) {
-      const intensity = decodeBloomIntensity(
-        bloomState.intensity,
-        bloomState.version ?? state.bloomVersion ?? BLOOM_SCALE_VERSION
-      );
-      this._setBloomIntensity(intensity, { syncShare: false });
-    }
-    if (typeof bloomState.enabled === 'boolean') {
-      this._setBloomEnabled(bloomState.enabled);
-    }
-
-    const sharpenState = state.sharpen || {};
-    if (typeof sharpenState.intensity === 'number' && this._sharpenSlider) {
-      const pct = Math.max(0, Math.min(100, Math.round(sharpenState.intensity)));
-      this._sharpenSlider.value = String(pct);
-      this._sharpenSliderValue.textContent = `${pct}%`;
-      this._applySharpenIntensity(pct / 100);
-    }
-    if (typeof sharpenState.enabled === 'boolean') {
-      this._setSharpenEnabled(sharpenState.enabled);
-    }
-
     const hudState = state.hud || {};
     if (hudState.variant) {
       this._setHudVariant(hudState.variant);
@@ -8678,19 +8260,6 @@ export class StyleManager {
     if (typeof hudState.visible === 'boolean') {
       this.hud.setMode(hudState.visible ? 'on' : 'off');
       this._updateHudButtonState();
-    }
-
-    const scopeState = state.scope || {};
-    if (typeof scopeState.enabled === 'boolean') {
-      setScopeMaskEnabled(scopeState.enabled);
-      this._scopeBtn?.classList.toggle('active', scopeState.enabled);
-      this._scopeBtn?.setAttribute('aria-pressed', String(scopeState.enabled));
-    }
-    if (typeof scopeState.featherPct === 'number' && this._scopeFeatherSlider) {
-      const pct = Math.max(0, Math.min(100, Math.round(scopeState.featherPct)));
-      this._scopeFeatherSlider.value = String(pct);
-      if (this._scopeFeatherValue) this._scopeFeatherValue.textContent = `${pct}%`;
-      setScopeMaskFeather(pct / 100);
     }
 
     const detectionState = state.detection || {};
@@ -8776,34 +8345,6 @@ export class StyleManager {
    * @param {object} preset
    */
   applyCinematicPreset(preset = {}) {
-    const bloomInput = typeof preset.bloom === 'object' ? preset.bloom : { intensity: preset.bloom };
-    let decodedBloomIntensity = null;
-    if (typeof bloomInput.intensity === 'number') {
-      decodedBloomIntensity = decodeBloomIntensity(
-        bloomInput.intensity,
-        bloomInput.version ?? preset.bloomVersion ?? BLOOM_SCALE_VERSION
-      );
-      this._setBloomIntensity(decodedBloomIntensity, { syncShare: false });
-    }
-    if (typeof bloomInput.enabled === 'boolean') {
-      this._setBloomEnabled(bloomInput.enabled);
-    } else if (typeof bloomInput.intensity === 'number') {
-      this._setBloomEnabled((decodedBloomIntensity ?? this._getBloomIntensity()) > 0);
-    }
-
-    const sharpenInput = typeof preset.sharpen === 'object' ? preset.sharpen : { enabled: preset.sharpen };
-    if (typeof sharpenInput.intensity === 'number' && this._sharpenSlider) {
-      const sharpenPct = Math.max(0, Math.min(100, Math.round(sharpenInput.intensity)));
-      this._sharpenSlider.value = String(sharpenPct);
-      this._sharpenSliderValue.textContent = `${sharpenPct}%`;
-      this._applySharpenIntensity(sharpenPct / 100);
-    }
-    if (typeof sharpenInput.enabled === 'boolean') {
-      this._setSharpenEnabled(sharpenInput.enabled);
-    } else if (typeof sharpenInput.intensity === 'number') {
-      this._setSharpenEnabled(sharpenInput.intensity > 0);
-    }
-
     if (preset.hudVariant) {
       this._setHudVariant(preset.hudVariant);
     }
@@ -8981,7 +8522,7 @@ export class StyleManager {
    * Switches the active visual style. Handles full lifecycle:
    * 1. Crossfades the previous shader stage intensity to 0.
    * 2. Crossfades the new shader stage intensity to 1.
-   * 3. Applies style preset defaults (bloom/sharpen/HUD) if applyPreset is true.
+   * 3. Applies style preset defaults (shader uniforms/HUD) if applyPreset is true.
    * 4. Updates button highlights, style indicator, slider panel, HUD, and detection overlay.
    * @param {string} styleName - Target style ('normal'|'retro'|'surveillance'|'thermal'|'anime'|'noir'|'snow').
    * @param {object} [options]
@@ -9160,9 +8701,8 @@ export class StyleManager {
       }
 
       // Update time uniforms for animated shaders. Zero-intensity stages
-      // are disabled (see _initStages — the scope is now the explicit
-      // scopeMask canvas), so enabled === visible here; only these keep
-      // the loop and its continuous-render hold alive.
+      // are disabled (see _initStages), so enabled === visible here; only
+      // these keep the loop and its continuous-render hold alive.
       let animatedStageVisible = false;
       for (const [, stage] of this._stageEntries) {
         if (stage.enabled && stage.uniforms.time !== undefined) {
@@ -9873,7 +9413,6 @@ export class StyleManager {
     // a screen reader without this. It matters more now that the button ships
     // ACTIVE from markup (default-on, 2026-08-22): the very first thing assistive
     // tech reported was an unpressed-looking control over an armed layer.
-    // Mirrors #scope-toggle, which has always carried aria-pressed.
     this._models3dBtn?.setAttribute('aria-pressed', String(this._models3dEnabled));
   }
 
