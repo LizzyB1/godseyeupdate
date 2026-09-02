@@ -13,6 +13,7 @@ import {
   enterCockpitWithTracking,
 } from './cockpitTracking.js';
 import { IntelHUD } from './hud.js';
+import { initHudReadoutsBox } from './hudReadoutsBox.js';
 import { ShareLinkManager } from './sharelink.js';
 import {
   isExplicitLayerStateOrigin,
@@ -274,11 +275,7 @@ const LEFT_STACK_OBSTACLE_SELECTOR = [
   '#cctv-sync-chip',
   '#intel-hud .hud-top-left',
   '#intel-hud .hud-top-right',
-  '#intel-hud .hud-bottom-left',
-  '#intel-hud .hud-bottom-right',
   '#intel-hud .hud-top-bar',
-  '#intel-hud .hud-bottom-bar',
-  '#intel-hud .hud-left-edge',
   '#intel-hud .hud-right-edge',
   '#cockpit-context',
   '#cesium-credits .cesium-credit-logoContainer',
@@ -331,11 +328,7 @@ const RIGHT_STACK_OBSTACLE_SELECTOR = [
   '#cctv-sync-chip',
   '#intel-hud .hud-top-left',
   '#intel-hud .hud-top-right',
-  '#intel-hud .hud-bottom-left',
-  '#intel-hud .hud-bottom-right',
   '#intel-hud .hud-top-bar',
-  '#intel-hud .hud-bottom-bar',
-  '#intel-hud .hud-left-edge',
   '#intel-hud .hud-right-edge',
   '#cockpit-context',
   '#cockpit-signal-stream',
@@ -2366,6 +2359,10 @@ export class StyleManager {
 
     // Intel HUD
     this.hud = new IntelHUD(viewer);
+    // Its individual data readouts (MGRS, lat/lon, GSD/NIIRS, ALT/SUN, AIS,
+    // COLL, ONA, bottom line) live in their own standalone movable box —
+    // see hudReadoutsBox.js's file-level comment for why.
+    this.hudReadouts = initHudReadoutsBox();
     this._cockpitVisionMode = 'optical';
     this._cockpitVisionRestore = null;
     this._cockpitPanelRestore = null;

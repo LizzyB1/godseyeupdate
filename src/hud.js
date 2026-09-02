@@ -3,9 +3,16 @@
  * @description Intelligence HUD Overlay — NRO/NGA Satellite Aesthetic.
  *
  * Renders authentic reconnaissance metadata over the Cesium canvas:
- * classification banners, live MGRS/lat-lon coordinates, sensor metrics
- * (GSD, NIIRS, ONA), timestamps, and orbital data — all updating in
+ * classification banners, timestamps, and orbital data — all updating in
  * real-time at configurable cadences.
+ *
+ * The individual numeric/text readouts this HUD used to render directly
+ * in its corner brackets — MGRS, lat/lon, GSD/NIIRS, ALT/SUN, AIS, COLL,
+ * ONA, and the bottom summary line — are still COMPUTED and WRITTEN here
+ * (`_updateCameraData` below), but their DOM elements now live in their
+ * own standalone, movable/resizable/hidable box — see `hudReadoutsBox.js`
+ * — so this class just looks them up by id via `document.getElementById`,
+ * same as it always has, and doesn't care where they physically are.
  *
  * The HUD auto-activates when a military-style shader (NVG, FLIR, CRT) is
  * selected and supports three layout variants: tactical, operator, minimal.
@@ -55,10 +62,12 @@ const NEARBY_POINTS = Object.values(CITY_POIS)
 /**
  * Full-screen intelligence HUD overlay rendered on top of the Cesium canvas.
  *
- * Displays classification banners, MGRS/lat-lon readouts, sensor metrics
- * (GSD, NIIRS, off-nadir angle), sun elevation, orbital metadata, and a
- * rolling semantic summary line. All values derive from the live camera
- * position and update on independent timer cadences.
+ * Displays classification banners, orbital metadata, and a rolling semantic
+ * summary line here in its own corner brackets. The MGRS/lat-lon/GSD/NIIRS/
+ * ALT/SUN/AIS/COLL/ONA/bottom-line readouts are computed and written here
+ * too, but rendered in `hudReadoutsBox.js`'s standalone box — see that
+ * module and the file-level comment above. All values derive from the live
+ * camera position and update on independent timer cadences.
  */
 export class IntelHUD {
   /**
@@ -136,8 +145,12 @@ export class IntelHUD {
 
   /**
    * Construct the HUD DOM structure inside the existing `#intel-hud` element.
-   * Populates corner brackets, classification banners, sensor readouts,
-   * edge metadata strips, and the bottom summary bar.
+   * Populates the classification/mission corner brackets and the static
+   * BAND/BITS/LVL edge strip. The numeric/text readout elements this used
+   * to also build here (MGRS, lat/lon, GSD/NIIRS, ALT/SUN, AIS, COLL, ONA,
+   * bottom line) are built by `hudReadoutsBox.js` instead — see the
+   * file-level comment — `_updateCameraData` still finds and writes them
+   * by id regardless of which module created them.
    */
   _buildDOM() {
     this._el = document.getElementById('intel-hud');
@@ -171,36 +184,10 @@ export class IntelHUD {
         <div class="hud-bracket">┐</div>
       </div>
 
-      <div class="hud-corner hud-bottom-left">
-        <div class="hud-bracket">└</div>
-        <div class="hud-content">
-          <div id="hud-mgrs">MGRS: ---</div>
-          <div id="hud-latlon">--°--'--"N ---°--'--"W</div>
-        </div>
-      </div>
-
-      <div class="hud-corner hud-bottom-right">
-        <div class="hud-content" style="text-align:right">
-          <div id="hud-gsd">GSD: --m  NIIRS: --</div>
-          <div id="hud-alt">ALT: --m   SUN: --° EL</div>
-          <div id="hud-ais-vessel" class="hud-ais-vessel">AIS: --</div>
-        </div>
-        <div class="hud-bracket">┘</div>
-      </div>
-
-      <div class="hud-edge hud-left-edge">
-        <div id="hud-coll">COLL: --:--:--Z</div>
-        <div id="hud-ona">ONA: --°</div>
-      </div>
-
       <div class="hud-edge hud-right-edge">
         <div>BAND: PAN</div>
         <div>BITS: 11</div>
         <div>LVL: 1A</div>
-      </div>
-
-      <div class="hud-bottom-bar">
-        <span id="hud-bottom-line">LAT: --  LON: --  MGRS: ---</span>
       </div>
     `;
     this._el.dataset.variant = this._variant;
