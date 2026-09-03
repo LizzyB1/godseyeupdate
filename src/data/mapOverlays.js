@@ -44,7 +44,19 @@ const RECOMPUTE_DEBOUNCE_MS = 550;
 // terrain-provider version to stay cheap on every recompute.
 const CONTOUR_GRID_COLS = 28;
 const CONTOUR_GRID_ROWS = 20;
-const MAX_CONTOUR_VIEW_SPAN_DEG = 1.5; // ~165km — above this, contours are too coarse to be meaningful
+/**
+ * Bounds for the user-adjustable "Zoom-in requirement" slider (see
+ * `setContourMaxViewSpanDeg`, `DEFAULT_STATE.contourMaxViewSpanDeg`) — the
+ * widest the current camera view is allowed to be for contours to compute
+ * at all. Used to be a fixed 1.5° (~165km) constant; a direct user report
+ * ("this box sometimes gives feedback that it needs an amount of field of
+ * view to render... add this requirement to a slidebar") turned it into a
+ * live setting instead, bounded to roughly the same "too coarse above this"
+ * territory the original constant picked (0.5° ~ 55km, 2.5° ~ 275km).
+ */
+export const CONTOUR_VIEW_SPAN_MIN_DEG = 0.5;
+export const CONTOUR_VIEW_SPAN_MAX_DEG = 2.5;
+const DEFAULT_CONTOUR_MAX_VIEW_SPAN_DEG = 1.5;
 // `camera.computeViewRectangle()` is an AXIS-ALIGNED bounding box around
 // four picked screen-corner points — for a nadir, unrotated camera that's
 // close to the true visible footprint, but for a tilted/rotated (oblique)
@@ -133,6 +145,10 @@ export const DEFAULT_STATE = Object.freeze({
   contourMajorSpacing: 50,
   contourMinorEnabled: false,
   contourMinorSpacing: 10,
+  // Widest the camera view is allowed to be for contours to compute at all
+  // — see `setContourMaxViewSpanDeg` and CONTOUR_VIEW_SPAN_MIN/MAX_DEG.
+  // The "Zoom-in requirement" slider in the UI.
+  contourMaxViewSpanDeg: DEFAULT_CONTOUR_MAX_VIEW_SPAN_DEG,
   // Chaikin corner-cutting passes applied to every drawn contour line (see
   // data/contourMath.js's smoothPolyline) — 0 is the raw marching-squares
   // line, higher numbers round it off more. This is the "precision" slider.
@@ -223,6 +239,8 @@ export class MapOverlaysEngine {
     this._chartDatumEntity = null;
     this._recomputeTimer = null;
     this._contourStatus = ''; // status line shown in the UI
+    this._contourPhase = 'offline'; // traffic-light state for the status line — see `_setStatus`'s doc comment
+    this._lastViewSpanDeg = null; // most recent camera-view span, in degrees — see `onViewSpanChange`/`_recomputeContours`
     this._computeToken = 0;
     // Shared durable cache — reverse-geocode results (see `_reverseGeocode`)
     // and, now, the finished contour map-visualization data (see
@@ -289,9 +307,24 @@ export class MapOverlaysEngine {
     saveState(this.state);
   }
 
-  _setStatus(text) {
+  /**
+   * @param {string} text - Human-readable status sentence.
+   * @param {'offline'|'loading'|'computing'|'done'} [phase] - The
+   *   traffic-light state for `mapOverlayControls.js`'s status light:
+   *   'offline' (red) = not rendering any contours right now (toggled
+   *   off, view too wide, no renderable surface); 'loading' (orange) =
+   *   blocked waiting on something external (terrain tiles streaming in);
+   *   'computing' (purple) = actively sampling/marching-squares-ing right
+   *   now; 'done' (green) = the current view's contours are finished and
+   *   on screen (including the "flat here, nothing to draw" case — that's
+   *   still a successfully finished render, just an empty one). Omitted
+   *   only by `_clearContours`'s bare reset, which every real caller
+   *   immediately follows with a phase-carrying call of its own.
+   */
+  _setStatus(text, phase) {
     this._contourStatus = text;
-    this.onStatusChange?.(text);
+    if (phase) this._contourPhase = phase;
+    this.onStatusChange?.(text, this._contourPhase);
   }
 
   // ── vertical exaggeration ───────────────────────────────────────────
@@ -335,6 +368,27 @@ export class MapOverlaysEngine {
   setContourMajorSpacing(meters) {
     const clamped = Cesium.Math.clamp(Number(meters) || 50, 5, 1000);
     this.state.contourMajorSpacing = clamped;
+    this._persist();
+    if (this.state.contoursEnabled) this._scheduleRecompute();
+  }
+
+  /**
+   * "Zoom-in requirement" slider — the widest the camera view is allowed
+   * to be for contours to compute at all (see the span check near the top
+   * of `_recomputeContours`). Widening it lets contours draw at a coarser
+   * zoom (at the cost of a coarser sample grid spread over more ground);
+   * narrowing it forces a closer zoom for a sharper result. Re-evaluates
+   * immediately so dragging the slider while zoomed out past the OLD limit
+   * but within the NEW one turns contours back on right away, without
+   * waiting for the next camera move.
+   */
+  setContourMaxViewSpanDeg(deg) {
+    const clamped = Cesium.Math.clamp(
+      Number(deg) || DEFAULT_CONTOUR_MAX_VIEW_SPAN_DEG,
+      CONTOUR_VIEW_SPAN_MIN_DEG,
+      CONTOUR_VIEW_SPAN_MAX_DEG,
+    );
+    this.state.contourMaxViewSpanDeg = clamped;
     this._persist();
     if (this.state.contoursEnabled) this._scheduleRecompute();
   }
@@ -579,7 +633,13 @@ export class MapOverlaysEngine {
     }
     this._clearContourFlags();
     this._clearRingLabels();
-    this._setStatus('');
+    // Default phase 'offline': every caller that clears contours for a
+    // reason OTHER than "nothing is rendering right now" (toggling off,
+    // view too wide, no renderable surface) immediately follows this with
+    // its own phase-carrying `_setStatus` call in the same synchronous
+    // pass, so this default is only ever the last word when contours were
+    // genuinely just turned off.
+    this._setStatus('', 'offline');
   }
 
   _scheduleRecompute() {
@@ -667,10 +727,10 @@ export class MapOverlaysEngine {
     this._clearContours();
     if (segmentCount > 0) {
       this._contourPrimitive = this.viewer.scene.primitives.add(newPrimitive);
-      this._setStatus(`${levelCount} level${levelCount === 1 ? '' : 's'}, ${segmentCount} segments (${Math.round(minH)}–${Math.round(maxH)} m relief).`);
+      this._setStatus(`${levelCount} level${levelCount === 1 ? '' : 's'}, ${segmentCount} segments (${Math.round(minH)}–${Math.round(maxH)} m relief).`, 'done');
     } else {
       newPrimitive.destroy();
-      this._setStatus(`Flat here — ${Math.round(minH)}–${Math.round(maxH)} m relief, no contour crossing.`);
+      this._setStatus(`Flat here — ${Math.round(minH)}–${Math.round(maxH)} m relief, no contour crossing.`, 'done');
     }
     this._applyContourFlags(flagSpotByLevel, levelPaletteIndex);
     this._applyRingLabels(rings);
@@ -688,12 +748,15 @@ export class MapOverlaysEngine {
     if (!this.state.contoursEnabled) return;
     const token = ++this._computeToken;
     const rect = this.viewer.camera.computeViewRectangle();
-    if (!rect) { this._setStatus('Camera view unavailable.'); return; }
+    if (!rect) { this._setStatus('Camera view unavailable.', 'offline'); return; }
 
     const spanDeg = Cesium.Math.toDegrees(Math.max(rect.width, rect.height));
-    if (spanDeg > MAX_CONTOUR_VIEW_SPAN_DEG) {
+    this._lastViewSpanDeg = spanDeg;
+    this.onViewSpanChange?.(spanDeg, this.state.contourMaxViewSpanDeg);
+    const maxSpanDeg = this.state.contourMaxViewSpanDeg;
+    if (spanDeg > maxSpanDeg) {
       this._clearContours();
-      this._setStatus(`Zoom in to compute contours (view is ${spanDeg.toFixed(1)}° wide, need < ${MAX_CONTOUR_VIEW_SPAN_DEG}°).`);
+      this._setStatus(`Zoom in to compute contours (view is ${spanDeg.toFixed(1)}° wide, need < ${maxSpanDeg.toFixed(1)}°).`, 'offline');
       return;
     }
 
@@ -717,8 +780,13 @@ export class MapOverlaysEngine {
     const cached = await this._cache.get(CONTOUR_GEOMETRY_CACHE_STORE, cacheKey);
     if (token !== this._computeToken) return; // superseded while the cache read was in flight
     if (cached) {
-      this._renderCachedContours(cached, token);
+      this._renderCachedContours(cached, token); // sets phase 'done' via _finishContourRender
       if (!forceLive && Date.now() - (cached.cachedAt || 0) < CONTOUR_CACHE_FRESH_MS) return;
+      // Fresh enough to preview instantly but not skip the live resample
+      // (or a forced refresh) — flip back to 'computing' so the light
+      // reflects that a real recompute is still running underneath the
+      // cached preview just painted.
+      this._setStatus(this._contourStatus, 'computing');
     }
 
     const rows = CONTOUR_GRID_ROWS;
@@ -732,7 +800,7 @@ export class MapOverlaysEngine {
       }
     }
 
-    this._setStatus('Sampling scene heights…');
+    this._setStatus('Sampling scene heights…', 'computing');
     const heights = sampleSceneHeights(this.viewer.scene, lonLatPairs);
     if (token !== this._computeToken) return; // superseded by a newer request
 
@@ -746,13 +814,13 @@ export class MapOverlaysEngine {
       // flash-then-change/flash-then-empty is what "contours show at boot
       // but disappear" was.
       this._retryCountThisCycle += 1;
-      this._setStatus('Sampling scene heights… (waiting for tiles to finish loading)');
+      this._setStatus('Sampling scene heights… (waiting for tiles to finish loading)', 'loading');
       setTimeout(() => { if (token === this._computeToken) this._recomputeContours({ forceLive }); }, RETRY_DELAY_MS);
       return;
     }
     if (!finite.length) {
       this._clearContours();
-      this._setStatus('No renderable surface here yet — move the view or wait for tiles to load.');
+      this._setStatus('No renderable surface here yet — move the view or wait for tiles to load.', 'offline');
       return;
     }
     const minH = Math.min(...finite);

@@ -10494,6 +10494,74 @@ body.scene-playback-mode #first-run-launcher {
   border-radius: 6px;
 }
 .mapovl-status:not(:empty) { background: rgba(0, 0, 0, 0.6); }
+
+/* Always-visible "View span: X.X° (limit Y.Y°)" readout — see
+   mapOverlayControls.js's viewSpanReadout / setContourMaxViewSpanDeg's
+   slider. Same chip look as .mapovl-status/.mapovl-hint; turns red text
+   when the current view is over the limit (contours can't compute right
+   now), matching the traffic light's red state below. */
+.mapovl-view-span-readout {
+  font: 500 11.5px/1.3 var(--font-mono);
+  color: var(--text-secondary);
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+}
+.mapovl-view-span-readout.is-over-limit {
+  color: #ff6b6b;
+}
+
+/* Contour render-phase traffic light — an at-a-glance dot + label
+   independent of the (more verbose) status sentence in .mapovl-status
+   below it. Colors: green = finished rendering, orange = waiting on
+   terrain tiles, purple = actively computing, red = not rendering any
+   contours right now (off / view too wide / no surface). See
+   data/mapOverlays.js's `_setStatus` doc comment for exact phase
+   semantics and mapOverlayControls.js's PHASE_META for the label text. */
+.mapovl-phase-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px 2px 4px;
+}
+.mapovl-phase-light {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  box-shadow: 0 0 4px 0 rgba(0, 0, 0, 0.6);
+  transition: background-color 150ms ease-out, box-shadow 150ms ease-out;
+}
+.mapovl-phase-light.is-done {
+  background: #3ddc84;
+  box-shadow: 0 0 6px 1px rgba(61, 220, 132, 0.75);
+}
+.mapovl-phase-light.is-loading {
+  background: #ffa53d;
+  box-shadow: 0 0 6px 1px rgba(255, 165, 61, 0.75);
+}
+.mapovl-phase-light.is-computing {
+  background: #b57bff;
+  box-shadow: 0 0 6px 1px rgba(181, 123, 255, 0.75);
+  animation: mapovl-phase-pulse 1.1s ease-in-out infinite;
+}
+.mapovl-phase-light.is-offline {
+  background: #ff5c5c;
+  box-shadow: 0 0 6px 1px rgba(255, 92, 92, 0.6);
+}
+@keyframes mapovl-phase-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mapovl-phase-light.is-computing { animation: none; }
+}
+.mapovl-phase-label {
+  font: 600 11px/1 var(--font-mono);
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
 .mapovl-btn {
   border: 1px solid var(--glass-border);
   border-radius: 6px;
