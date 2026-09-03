@@ -306,17 +306,29 @@ const LABEL_DECLUTTER_MAX_STEPS = 3;
  * text, and font size — text width isn't actually measured (a real
  * `CanvasRenderingContext2D.measureText` call per label per frame would
  * defeat the point of keeping this cheap), just approximated from
- * character count. `dropShadowLabelProps` anchors every label
- * horizontally CENTERED and vertically at its BOTTOM, so the box sits
- * centered above `(anchorX, anchorY)`.
+ * character count. `dropShadowLabelProps` anchors every flag/ring label
+ * horizontally CENTERED and vertically at its BOTTOM (`verticalAnchor`
+ * default `'bottom'`), so by default the box sits centered above
+ * `(anchorX, anchorY)`; pass `'center'` for a label anchored at
+ * `VerticalOrigin.CENTER` instead (e.g. `data/mapOverlays.js`'s grid line
+ * labels), which centers the box on `anchorY` instead.
  * @param {number} anchorX @param {number} anchorY
  * @param {string} text @param {number} fontSizePx
+ * @param {'bottom'|'center'} [verticalAnchor]
  * @returns {{left:number, right:number, top:number, bottom:number}}
  */
-export function estimateLabelBox(anchorX, anchorY, text, fontSizePx) {
+export function estimateLabelBox(anchorX, anchorY, text, fontSizePx, verticalAnchor = 'bottom') {
   const charWidth = fontSizePx * GLYPH_WIDTH_FRACTION;
   const width = Math.max(charWidth * 2, (text?.length || 1) * charWidth);
   const height = fontSizePx * 1.15;
+  if (verticalAnchor === 'center') {
+    return {
+      left: anchorX - width / 2,
+      right: anchorX + width / 2,
+      top: anchorY - height / 2,
+      bottom: anchorY + height / 2,
+    };
+  }
   return {
     left: anchorX - width / 2,
     right: anchorX + width / 2,
@@ -416,6 +428,62 @@ export function installFlagAvoidance(viewer, getEntities) {
       if (!resolved.visible) continue;
       placedBoxes.push({ left: box.left, right: box.right, top: box.top + resolved.extraY, bottom: box.bottom + resolved.extraY });
       entity.label.pixelOffset = new Cesium.Cartesian2(offsetX, offsetY + resolved.extraY);
+    }
+  };
+  const remove = viewer.scene.postRender.addEventListener(handler);
+  return remove;
+}
+
+/**
+ * Same per-frame panel-avoidance + mutual-overlap-avoidance as
+ * `installFlagAvoidance`, but for a plain `Cesium.LabelCollection`'s
+ * `Label` objects rather than `Entity`-wrapped flags/ring labels — used by
+ * `data/mapOverlays.js`'s lat/long grid line labels. Those are placed at a
+ * fixed position along each line (a meridian's label sits at the view's
+ * vertical center, a parallel's at the horizontal center) with no
+ * collision awareness of its own; in a tilted 3D view, several grid
+ * lines' projected paths can converge close together on screen (nowhere
+ * near a straight top-down graticule), stacking their labels into
+ * unreadable overlapping text. This keeps them apart the same way flags
+ * are kept apart from each other and from control panels, hiding one
+ * outright only if it truly can't find a clear spot.
+ *
+ * No center-bias pass here (unlike `installFlagAvoidance`): the grid
+ * labels' own midpoint placement already deliberately spreads them across
+ * the middle of the screen, so pulling them toward center too would fight
+ * that spread rather than help it.
+ *
+ * A `Cesium.Label`'s properties (`position`, `text`, `pixelOffset`,
+ * `show`) are plain values, not time-dynamic Cesium `Property` objects
+ * like an `Entity.label`'s — so, unlike `installFlagAvoidance`, no
+ * `JulianDate`/`.getValue()` is needed to read them.
+ * @param {Cesium.Viewer} viewer
+ * @param {() => Array<Cesium.Label>} getLabels - called fresh each frame, so a rebuilt label set is picked up automatically.
+ * @returns {() => void} call to uninstall.
+ */
+export function installLabelCollectionAvoidance(viewer, getLabels) {
+  const handler = () => {
+    const labels = getLabels();
+    if (!labels || !labels.length) return;
+    const panelRects = visiblePanelRects();
+    const placedBoxes = [];
+    for (const label of labels) {
+      if (!label || label.isDestroyed?.()) continue;
+      const pos = label.position;
+      if (!pos) continue;
+      const screen = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, pos);
+      if (!screen) continue;
+      const avoidPanel = panelAvoidanceOffsetFromRects(screen.x, screen.y, panelRects);
+      const base = label._gevBaseOffset || Cesium.Cartesian2.ZERO;
+      const offsetX = base.x + avoidPanel.x;
+      const offsetY = base.y + avoidPanel.y;
+      const fontSize = label._gevFontSize || 20;
+      const box = estimateLabelBox(screen.x + offsetX, screen.y + offsetY, label.text, fontSize, 'center');
+      const resolved = resolveLabelOverlap(box, placedBoxes);
+      label.show = resolved.visible;
+      if (!resolved.visible) continue;
+      placedBoxes.push({ left: box.left, right: box.right, top: box.top + resolved.extraY, bottom: box.bottom + resolved.extraY });
+      label.pixelOffset = new Cesium.Cartesian2(offsetX, offsetY + resolved.extraY);
     }
   };
   const remove = viewer.scene.postRender.addEventListener(handler);

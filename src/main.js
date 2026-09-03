@@ -41,6 +41,7 @@ import { initPanelRestoreTray } from './panelRestoreTray.js';
 import { initAboutBox } from './aboutBox.js';
 import { initStatusBox } from './statusBox.js';
 import { initCacheControllerBox } from './cacheControllerBox.js';
+import { initCompassBox } from './compassBox.js';
 import { initBathymetry } from './data/bathymetry.js';
 import { initBathymetryBox } from './bathymetryBox.js';
 import { resolveApiKey } from './apiKeys.js';
@@ -401,6 +402,14 @@ async function init() {
     // listStores()/clearStore().
     const cacheControllerBox = initCacheControllerBox();
 
+    // True-north reference ring + local magnetic-declination needle,
+    // recomputed as the camera moves — see src/compassBox.js and
+    // src/data/magneticDeclination.js (WMM). Independent of
+    // cameraControls.js's own orientation compass, which shows where the
+    // camera is looking rather than how magnetic north disagrees with true
+    // north at the current location.
+    const compassBox = initCompassBox(viewer);
+
     // GUI overhaul: lets the DISPLAY, DATA LAYERS, CCTV, SCENES, and CONTEXT
     // panels be dragged free of their managed stacks — see src/panelDrag.js
     // for why the command-dock hover trays (Visual Presets/Location) are
@@ -505,6 +514,7 @@ async function init() {
       aboutBox,
       statusBox,
       cacheControllerBox,
+      compassBox,
       panelDrag,
       getRenderGovernorDiagnostics,
       requestRender: governorRequestRender,

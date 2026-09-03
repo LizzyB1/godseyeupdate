@@ -1,10 +1,10 @@
 import * as Cesium from 'cesium';
-import { marchingSquaresSegments, gridToLonLat, extremeSegmentPoint, stitchSegmentsIntoPolylines, smoothPolyline } from './contourMath.js';
+import { marchingSquaresSegments, gridToLonLat, extremeSegmentPoint, stitchSegmentsIntoPolylines, smoothPolyline, computeCellHeightRange } from './contourMath.js';
 import { formatLatLonDMS, formatLatLonDecimal, googleMapsLink, formatHeight, toDMS } from './coordFormat.js';
 import { resolveApiKey } from '../apiKeys.js';
 import { sampleSceneHeights } from './sceneHeight.js';
 import { getSharedCache } from './apiCache.js';
-import { buildContourFlags, buildRingLabels, installFlagAvoidance, thinSpotsByStep, DEFAULT_FLAG_FONT_SIZE } from './contourFlags.js';
+import { buildContourFlags, buildRingLabels, installFlagAvoidance, installLabelCollectionAvoidance, thinSpotsByStep, DEFAULT_FLAG_FONT_SIZE } from './contourFlags.js';
 import { LAND_CONTOUR_PALETTE, paletteColorHex } from './contourColors.js';
 
 /**
@@ -57,6 +57,19 @@ const MAX_CONTOUR_VIEW_SPAN_DEG = 1.5; // ~165km — above this, contours are to
 // canvas — see `_anyPositionOnScreen`.
 const CONTOUR_SCREEN_MARGIN_PX = 40; // generous slack so a chain right at the true edge doesn't flicker in/out
 const MAX_CONTOUR_LEVELS = 60; // hard cap so pathological relief can't spawn thousands of polylines
+/** Hard cap on flags per individual on-screen contour chain — see the flag-placement comment in `_recomputeContours`. A level's height must also be a clean multiple of 50 to get more than 1. */
+const MAX_FLAGS_PER_CHAIN = 2;
+/**
+ * A grid cell whose corner-height range already spans this many
+ * minor-contour intervals gets its minor lines suppressed (majors are
+ * never touched) — see `computeCellHeightRange`'s comment and the
+ * `cellHeightRange`/`minorSteepCutoff` use in `_recomputeContours`. This is
+ * what stops the "solid smear of parallel lines" artifact on cliff-steep
+ * terrain: once 3+ minor lines would land in the same handful of on-screen
+ * pixels no matter the camera angle, drawing them adds noise, not
+ * information, so they're dropped at the source instead of overlapping.
+ */
+const MINOR_CONTOUR_STEEP_INTERVALS = 3;
 const MAX_GRID_LINES_PER_AXIS = 60;
 /** Valid `flagEdges`/edge-argument values, in the fixed order UI checkboxes present them. */
 const FLAG_EDGES = ['west', 'east', 'north', 'south'];
@@ -139,6 +152,10 @@ export const DEFAULT_STATE = Object.freeze({
   // (see `_recomputeGrid`), so there's nothing extra to cull: on screen ==
   // in the visible viewport, by construction.
   lineLabelsEnabled: false,
+  // Grid line label text size — independent of the flag/ring-label sizes,
+  // and of LINE_LABEL_FONT's old hardcoded 20px (now just this state's
+  // default). See `setGridLabelFontSize`.
+  gridLabelFontSize: 20,
   // Big "flag" call-outs (pole + numbered plaque) on every major contour
   // line currently on screen — a separate toggle from `lineLabelsEnabled`
   // (grid) and from `contoursEnabled` (the lines themselves): the flags can
@@ -177,11 +194,6 @@ export const DEFAULT_STATE = Object.freeze({
   // `_recomputeChartDatum`.
   chartDatumEnabled: true,
 });
-
-/** Font for grid/contour line value labels — deliberately large, per the
- * feature's own purpose: readable at a glance, not a fine-print readout
- * like the rest of the HUD. */
-const LINE_LABEL_FONT = '700 20px sans-serif';
 
 function loadState() {
   try {
@@ -234,6 +246,19 @@ export class MapOverlaysEngine {
     this._removeFlagAvoidance = installFlagAvoidance(
       this.viewer,
       () => [...this._contourFlagEntities, ...this._ringLabelEntities],
+    );
+    // Grid line labels (see _recomputeGrid) are a plain Cesium.LabelCollection,
+    // not entities — same panel/mutual-overlap avoidance, different Label API
+    // underneath (see installLabelCollectionAvoidance's own doc for why).
+    this._removeGridLabelAvoidance = installLabelCollectionAvoidance(
+      this.viewer,
+      () => {
+        const coll = this._gridLabelPrimitive;
+        if (!coll) return [];
+        const out = [];
+        for (let i = 0; i < coll.length; i += 1) out.push(coll.get(i));
+        return out;
+      },
     );
 
     this._cursorActive = false;
@@ -425,6 +450,13 @@ export class MapOverlaysEngine {
     // `this.state.lineLabelsEnabled` check, which does nothing if the grid
     // itself isn't enabled.
     if (this.state.gridEnabled) this._recomputeGrid();
+  }
+
+  /** Text size (px) for grid line value labels — the "Text size" slider next to "Show grid value labels". */
+  setGridLabelFontSize(px) {
+    this.state.gridLabelFontSize = Cesium.Math.clamp(Number(px) || DEFAULT_STATE.gridLabelFontSize, 12, 48);
+    this._persist();
+    if (this.state.gridEnabled && this.state.lineLabelsEnabled) this._recomputeGrid();
   }
 
   // ── contour elevation flags ─────────────────────────────────────────
@@ -728,12 +760,12 @@ export class MapOverlaysEngine {
 
     const levels = [];
     const major = this.state.contourMajorSpacing;
+    const minor = this.state.contourMinorSpacing;
     const firstMajor = Math.ceil(minH / major) * major;
     for (let lvl = firstMajor; lvl <= maxH && levels.length < MAX_CONTOUR_LEVELS; lvl += major) {
       levels.push({ height: lvl, major: true });
     }
     if (this.state.contourMinorEnabled) {
-      const minor = this.state.contourMinorSpacing;
       const firstMinor = Math.ceil(minH / minor) * minor;
       for (let lvl = firstMinor; lvl <= maxH && levels.length < MAX_CONTOUR_LEVELS; lvl += minor) {
         if (Math.abs(lvl % major) < 1e-6) continue; // already a major level
@@ -773,6 +805,18 @@ export class MapOverlaysEngine {
     const rings = [];
     const smoothing = this.state.contourSmoothing;
 
+    // Per-cell relief, computed once for the whole grid (not per level) —
+    // see `computeCellHeightRange` and `MINOR_CONTOUR_STEEP_INTERVALS`.
+    // Only needed when minors are even on; a cell whose corners already
+    // span this many minor intervals gets its minor-level segments
+    // suppressed below, which is what stops cliff-steep ground from
+    // rendering as a solid smear of overlapping parallel lines.
+    const cellHeightRange = this.state.contourMinorEnabled ? computeCellHeightRange(heights, rows, cols) : null;
+    const minorSteepCutoff = minor * MINOR_CONTOUR_STEEP_INTERVALS;
+    const minorCellFilter = cellHeightRange
+      ? (r, c) => cellHeightRange[r * (cols - 1) + c] <= minorSteepCutoff
+      : undefined;
+
     // Mirror of `newPrimitive`'s lines as plain, JSON-serializable data
     // (lon/lat pairs, not Cartesian3) — this is exactly what gets written
     // to CONTOUR_GEOMETRY_CACHE_STORE below, and exactly what
@@ -782,7 +826,7 @@ export class MapOverlaysEngine {
     const newPrimitive = new Cesium.PolylineCollection();
     let segmentCount = 0;
     for (const { height, major: isMajor } of sortedLevels) {
-      const segs = marchingSquaresSegments(heights, rows, cols, height);
+      const segs = marchingSquaresSegments(heights, rows, cols, height, isMajor ? undefined : minorCellFilter);
       segmentCount += segs.length;
       const lineColor = colorForLevel(height).withAlpha(isMajor ? 0.85 : 0.35);
 
@@ -828,15 +872,42 @@ export class MapOverlaysEngine {
           const topLL = gridToLonLat(top.x, top.y, rows, cols, west, south, east, north);
           rings.push({ level: height, lon: topLL.lon, lat: topLL.lat });
         }
-      }
 
-      if (isMajor) {
-        const spots = [];
-        for (const edge of this.state.flagEdges) {
-          const spot = extremeSegmentPoint(segs, rows, cols, west, south, east, north, edge);
-          if (spot) spots.push(spot);
+        // Flag anchors, restricted to THIS chain (a single continuous
+        // on-screen contour) rather than the level's raw, unfiltered
+        // segment list. This is deliberately the fix for flags landing on
+        // (or being anchored toward) a piece of a level's line that isn't
+        // actually rendered: the old code ran extremeSegmentPoint once per
+        // level over EVERY segment at that height, on/off-screen alike, so
+        // a level with an off-screen chain and a tiny on-screen one could
+        // still get its flag pulled toward the invisible chain. Deriving
+        // flag spots exclusively from chains that already passed the same
+        // `_anyPositionOnScreen` cull as the line itself means a flag can
+        // never be placed on — or biased toward — geometry that isn't on
+        // screen in the first place, and a chain with no on-screen portion
+        // simply never contributes a flag at all. Since flags are rebuilt
+        // fresh every recompute (camera moveEnd), this tracks the viewport
+        // continuously rather than needing a separate per-frame patrol.
+        if (isMajor && this.state.flagEdges.length) {
+          // "No more than 2 labels per continuous contour" — and only 1 (or
+          // 0, if nothing matches) for a level whose height isn't a clean
+          // multiple of 50, per a direct ask: round-number elevations get
+          // the fuller treatment, in-between ones stay quieter.
+          const maxFlagsThisChain = (Math.round(height) % 50 === 0) ? MAX_FLAGS_PER_CHAIN : 1;
+          const chainSegs = [];
+          for (let i = 0; i < chain.points.length - 1; i += 1) chainSegs.push([chain.points[i], chain.points[i + 1]]);
+          const chainSpots = [];
+          for (const edge of this.state.flagEdges) {
+            if (chainSpots.length >= maxFlagsThisChain) break;
+            const spot = extremeSegmentPoint(chainSegs, rows, cols, west, south, east, north, edge);
+            if (spot && !chainSpots.some((s) => s.lon === spot.lon && s.lat === spot.lat)) chainSpots.push(spot);
+          }
+          if (chainSpots.length) {
+            const existing = flagSpotByLevel.get(height);
+            if (existing) existing.push(...chainSpots);
+            else flagSpotByLevel.set(height, chainSpots);
+          }
         }
-        if (spots.length) flagSpotByLevel.set(height, spots);
       }
     }
 
@@ -923,9 +994,28 @@ export class MapOverlaysEngine {
     const thinnedMeridians = thin(meridians, MAX_GRID_LINES_PER_AXIS);
     const thinnedParallels = thin(parallels, MAX_GRID_LINES_PER_AXIS);
 
+    // Same screen-space cull the contour lines already use (see
+    // `_anyPositionOnScreen`'s own comment on why `computeViewRectangle()`'s
+    // axis-aligned bbox over-samples a tilted/rotated camera's true visible
+    // footprint): a meridian/parallel spans the FULL bbox edge to edge, so
+    // for an oblique view a fair number of them never actually cross the
+    // visible quadrilateral at all. Sampled at 5 points along each line
+    // (not just its 2 endpoints) since a line that bows across a tilted
+    // projection can have both endpoints off-screen while its middle still
+    // crosses the visible area. Filtered BEFORE label placement too, so an
+    // invisible line never gets an orphan label either.
+    const meridianSamples = (lon) => [0, 0.25, 0.5, 0.75, 1].map(
+      (t) => Cesium.Cartesian3.fromDegrees(lon, south + (north - south) * t, 0),
+    );
+    const parallelSamples = (lat) => [0, 0.25, 0.5, 0.75, 1].map(
+      (t) => Cesium.Cartesian3.fromDegrees(west + (east - west) * t, lat, 0),
+    );
+    const visibleMeridians = thinnedMeridians.filter((lon) => this._anyPositionOnScreen(meridianSamples(lon)));
+    const visibleParallels = thinnedParallels.filter((lat) => this._anyPositionOnScreen(parallelSamples(lat)));
+
     const color = Cesium.Color.fromCssColorString(this.state.gridColor).withAlpha(0.55);
     const newPrimitive = new Cesium.PolylineCollection();
-    for (const lon of thinnedMeridians) {
+    for (const lon of visibleMeridians) {
       newPrimitive.add({
         positions: [
           Cesium.Cartesian3.fromDegrees(lon, south, 0),
@@ -935,7 +1025,7 @@ export class MapOverlaysEngine {
         material: Cesium.Material.fromType('Color', { color }),
       });
     }
-    for (const lat of thinnedParallels) {
+    for (const lat of visibleParallels) {
       newPrimitive.add({
         positions: [
           Cesium.Cartesian3.fromDegrees(west, lat, 0),
@@ -956,12 +1046,14 @@ export class MapOverlaysEngine {
       // the middle of the screen rather than piling up at an edge.
       const midLat = (south + north) / 2;
       const midLon = (west + east) / 2;
+      const fontSize = this.state.gridLabelFontSize || DEFAULT_STATE.gridLabelFontSize;
+      const font = `700 ${fontSize}px sans-serif`;
       const labelPrimitive = new Cesium.LabelCollection();
-      for (const lon of thinnedMeridians) {
-        labelPrimitive.add({
+      for (const lon of visibleMeridians) {
+        const label = labelPrimitive.add({
           position: Cesium.Cartesian3.fromDegrees(lon, midLat, 0),
           text: toDMS(lon, false),
-          font: LINE_LABEL_FONT,
+          font,
           fillColor: Cesium.Color.WHITE,
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 4,
@@ -969,12 +1061,17 @@ export class MapOverlaysEngine {
           horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
           verticalOrigin: Cesium.VerticalOrigin.CENTER,
         });
+        // Tagged for installLabelCollectionAvoidance (see contourFlags.js) —
+        // a plain Cesium.Label has no equivalent of an Entity's data-only
+        // custom fields, but plain property assignment works the same way.
+        label._gevFontSize = fontSize;
+        label._gevBaseOffset = Cesium.Cartesian2.ZERO;
       }
-      for (const lat of thinnedParallels) {
-        labelPrimitive.add({
+      for (const lat of visibleParallels) {
+        const label = labelPrimitive.add({
           position: Cesium.Cartesian3.fromDegrees(midLon, lat, 0),
           text: toDMS(lat, true),
-          font: LINE_LABEL_FONT,
+          font,
           fillColor: Cesium.Color.WHITE,
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 4,
@@ -982,6 +1079,8 @@ export class MapOverlaysEngine {
           horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
           verticalOrigin: Cesium.VerticalOrigin.CENTER,
         });
+        label._gevFontSize = fontSize;
+        label._gevBaseOffset = Cesium.Cartesian2.ZERO;
       }
       this._gridLabelPrimitive = this.viewer.scene.primitives.add(labelPrimitive);
     }
@@ -1184,6 +1283,7 @@ export class MapOverlaysEngine {
     this.viewer.camera.moveEnd.removeEventListener(this._onCameraMoveEnd);
     if (this._recomputeTimer) clearTimeout(this._recomputeTimer);
     this._removeFlagAvoidance?.();
+    this._removeGridLabelAvoidance?.();
     this._clearContours();
     this.viewer.dataSources.remove(this._contourFlagDataSource, true);
     this.viewer.dataSources.remove(this._contourRingLabelDataSource, true);

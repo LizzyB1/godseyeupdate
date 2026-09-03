@@ -22,7 +22,11 @@
 
 import { hidePanel, isPanelHidden, registerPanelLabel } from './panelVisibility.js';
 
-const EDGE_INSET = 6;
+// Per a direct user ask ("allow boxes to touch the edge of the screen") —
+// was 6px; a small residual inset is kept only so the header/resize-handle
+// hit areas never sit literally under the OS/browser chrome edge, but a
+// box can now sit almost flush against the viewport.
+const EDGE_INSET = 1;
 
 /** Clamp a box's top-left so it stays fully on-screen at its current size. */
 function clampToViewport(left, top, width, height) {
@@ -93,6 +97,19 @@ export function buildMiniBox(opts) {
 
   if (typeof onHeaderBuilt === 'function') onHeaderBuilt(header);
 
+  // Collapse (−) before close/hide (×) — per a direct user ask ("swap the
+  // close and minimise in the gui"). Collapse is the low-stakes, frequent
+  // action (just tucks the body away, box stays put); close/hide is the
+  // rarer, bigger one (drops the panel into the Hidden Panels tray), so it
+  // now sits furthest from where a header click naturally lands first.
+  const collapseBtn = document.createElement('button');
+  collapseBtn.type = 'button';
+  collapseBtn.className = cls('collapse-btn');
+  collapseBtn.title = 'Collapse/expand';
+  collapseBtn.setAttribute('aria-label', 'Collapse or expand panel');
+  collapseBtn.textContent = '−';
+  header.appendChild(collapseBtn);
+
   if (hideable) {
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
@@ -107,14 +124,6 @@ export function buildMiniBox(opts) {
     header.appendChild(closeBtn);
     registerPanelLabel(root.id, title);
   }
-
-  const collapseBtn = document.createElement('button');
-  collapseBtn.type = 'button';
-  collapseBtn.className = cls('collapse-btn');
-  collapseBtn.title = 'Collapse/expand';
-  collapseBtn.setAttribute('aria-label', 'Collapse or expand panel');
-  collapseBtn.textContent = '−';
-  header.appendChild(collapseBtn);
 
   root.appendChild(header);
 

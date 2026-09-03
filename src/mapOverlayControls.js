@@ -303,9 +303,22 @@ export class MapOverlayControls {
     labelRow.appendChild(labelEnable);
     labelRow.appendChild(document.createTextNode('Show grid value labels'));
     labelSection.appendChild(labelRow);
+
+    const gridLabelSizeRow = el('div', 'mapovl-slider-row');
+    gridLabelSizeRow.appendChild(el('div', 'mapovl-slider-row-label', 'Text size'));
+    const gridLabelSizeInput = document.createElement('input');
+    gridLabelSizeInput.type = 'range';
+    gridLabelSizeInput.min = '12';
+    gridLabelSizeInput.max = '48';
+    gridLabelSizeInput.step = '1';
+    gridLabelSizeInput.value = String(this.engine.state.gridLabelFontSize);
+    gridLabelSizeRow.appendChild(gridLabelSizeInput);
+    gridLabelSizeRow.appendChild(sliderScale(['12', '21', '30', '39', '48']));
+    labelSection.appendChild(gridLabelSizeRow);
     body.appendChild(labelSection);
 
     labelEnable.addEventListener('change', () => this.engine.setLineLabelsEnabled(labelEnable.checked));
+    gridLabelSizeInput.addEventListener('input', () => this.engine.setGridLabelFontSize(Number(gridLabelSizeInput.value)));
 
     // ── Contour elevation flags ─────────────────────────────────────────
     // Independent of both "Show contour lines" and the grid labels above —
@@ -356,41 +369,13 @@ export class MapOverlayControls {
     flagSizeInput.addEventListener('input', () => this.engine.setFlagFontSize(Number(flagSizeInput.value)));
 
     // Flag background is always transparent now (heavy black-shadow white
-    // text instead of a color-picked plaque — see data/contourFlags.js), so
-    // there's no color/alpha control any more. In its place: which edge(s)
-    // of the view each level gets a flag placed toward — multi-select
-    // toggle buttons, same pattern as the exaggeration buttons above.
-    const flagEdgeRow = el('div', 'mapovl-row');
-    flagEdgeRow.appendChild(document.createTextNode('Edges'));
-    const flagEdgeButtons = [];
-    const markActiveEdges = (edges) => {
-      for (const btn of flagEdgeButtons) btn.classList.toggle('is-active', edges.includes(btn.dataset.value));
-    };
-    for (const { label, value } of [
-      { label: 'W', value: 'west' },
-      { label: 'E', value: 'east' },
-      { label: 'N', value: 'north' },
-      { label: 'S', value: 'south' },
-    ]) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'mapovl-btn';
-      btn.dataset.value = value;
-      btn.textContent = label;
-      btn.title = `Flag toward the view's ${value} edge`;
-      btn.setAttribute('aria-label', `Toggle flags on the ${value} edge`);
-      btn.addEventListener('click', () => {
-        const current = this.engine.state.flagEdges;
-        const next = current.includes(value) ? current.filter((e) => e !== value) : [...current, value];
-        this.engine.setFlagEdges(next);
-        markActiveEdges(this.engine.state.flagEdges);
-      });
-      flagEdgeButtons.push(btn);
-      flagEdgeRow.appendChild(btn);
-    }
-    markActiveEdges(this.engine.state.flagEdges);
-    flagSection.appendChild(flagEdgeRow);
-
+    // text instead of a color-picked plaque — see data/contourFlags.js).
+    // There used to be a per-edge W/E/N/S multi-select here letting an
+    // operator restrict which view edge(s) got flags; removed per user
+    // request ("remove the edge NESW thing for the contour labels") since
+    // the engine now always places flags toward all four edges
+    // (data/mapOverlays.js's DEFAULT_STATE.flagEdges) and the extra control
+    // was redundant clutter.
     body.appendChild(flagSection);
 
     flagEnable.addEventListener('change', () => this.engine.setContourFlagsEnabled(flagEnable.checked));
@@ -414,10 +399,10 @@ export class MapOverlayControls {
       gridSpacingSelect.value = String(this.engine.state.gridSpacingDeg);
       gridColorInput.value = this.engine.state.gridColor;
       labelEnable.checked = false;
+      gridLabelSizeInput.value = String(this.engine.state.gridLabelFontSize);
       flagEnable.checked = false;
       flagStepSelect.value = String(this.engine.state.flagLabelStep);
       flagSizeInput.value = String(this.engine.state.flagFontSize);
-      markActiveEdges(this.engine.state.flagEdges);
       this._setContourStatus('');
     });
     body.appendChild(resetBtn);

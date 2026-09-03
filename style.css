@@ -9425,23 +9425,9 @@ body.scene-playback-mode #first-run-launcher {
   letter-spacing: 0.08em;
   color: var(--text-secondary);
 }
-.gpstrack-close-btn,
-.gpstrack-collapse-btn {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: var(--text-secondary);
-  font: 700 12px/1 var(--font-mono);
-  cursor: pointer;
-}
-.gpstrack-close-btn:hover { color: #ffffff; border-color: #ffffff; }
-.gpstrack-collapse-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+/* Close/collapse chip styling: the generic `[class$="-close-btn"]`/
+   `[class$="-collapse-btn"]` rules above cover this box too now — see
+   their comment. */
 .gpstrack-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -9518,30 +9504,45 @@ body.scene-playback-mode #first-run-launcher {
 [class*="-pad"].is-collapsed [class*="-resize-handle"] {
   display: none;
 }
-/* Shared "×" hide-panel chip for every `buildMiniBox` box — matches the
-   square collapse-button chip next to it (see `miniBox.js`'s built-in
-   `hideable` support, on by default for every mini-box). Boxes that
-   already had their own hand-rolled `.<prefix>-close-btn` rule (Bathymetry/
-   GPS Tracks) keep it as an identical duplicate; this generic rule is what
-   covers every box that didn't (Camera, Map Overlays, Coordinates, HUD
-   Readouts, and any future one) without needing its own per-box CSS. */
-[class$="-close-btn"] {
+/* Shared "×" hide-panel / "−" collapse chip for every `buildMiniBox` box
+   (see `miniBox.js`'s built-in `hideable` support, on by default for every
+   mini-box, and its collapse button, always on). Every box's buttons are
+   named `<prefix>-close-btn`/`<prefix>-collapse-btn`, so these two
+   attribute-selector rules alone cover every box, current and future, with
+   no per-box CSS needed — there used to be several boxes (Bathymetry, GPS
+   Tracks, About, Status, Cache Controller) with their own byte-identical
+   hand-rolled duplicate of the close+collapse block, plus several more
+   (Map Overlays/Camera/Coordinates, HUD Readouts, Summary, Restore Tray)
+   with a standalone duplicate of just the collapse half — consolidated
+   away since a later-in-file per-box duplicate silently overriding an
+   earlier generic-rule edit was exactly what made "make them bigger,
+   everywhere" unsafe to do as a single-rule change before. Bumped larger
+   (18px -> 24px) and higher-contrast (dim secondary text on a half-opaque
+   chip -> primary text on a near-opaque one) per a direct user ask. */
+[class$="-close-btn"],
+[class$="-collapse-btn"] {
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--glass-border);
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: var(--text-secondary);
-  font: 700 12px/1 var(--font-mono);
+  background: rgba(0, 0, 0, 0.78);
+  color: var(--text-primary);
+  font: 700 15px/1 var(--font-mono);
   cursor: pointer;
 }
 [class$="-close-btn"]:hover {
   color: #ffffff;
   border-color: #ffffff;
+  background: rgba(0, 0, 0, 0.92);
+}
+[class$="-collapse-btn"]:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+  background: rgba(0, 0, 0, 0.92);
 }
 
 /* ── About: standalone mini-box chrome (src/aboutBox.js) ──────────────
@@ -9587,23 +9588,8 @@ body.scene-playback-mode #first-run-launcher {
   letter-spacing: 0.08em;
   color: var(--text-secondary);
 }
-.about-close-btn,
-.about-collapse-btn {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: var(--text-secondary);
-  font: 700 12px/1 var(--font-mono);
-  cursor: pointer;
-}
-.about-close-btn:hover { color: #ffffff; border-color: #ffffff; }
-.about-collapse-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+/* Close/collapse chip styling: covered by the generic
+   `[class$="-close-btn"]`/`[class$="-collapse-btn"]` rules above. */
 .about-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -9700,23 +9686,8 @@ body.scene-playback-mode #first-run-launcher {
   letter-spacing: 0.08em;
   color: var(--text-secondary);
 }
-.statusbox-close-btn,
-.statusbox-collapse-btn {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: var(--text-secondary);
-  font: 700 12px/1 var(--font-mono);
-  cursor: pointer;
-}
-.statusbox-close-btn:hover { color: #ffffff; border-color: #ffffff; }
-.statusbox-collapse-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+/* Close/collapse chip styling: covered by the generic
+   `[class$="-close-btn"]`/`[class$="-collapse-btn"]` rules above. */
 .statusbox-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -10334,21 +10305,9 @@ body.scene-playback-mode #first-run-launcher {
   cursor: pointer;
 }
 .mapovl-share-btn:hover { color: var(--text-primary); border-color: var(--accent); }
-.mapovl-collapse-btn, .camctl-collapse-btn, .coordbox-collapse-btn {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: var(--text-secondary);
-  font: 700 12px/1 var(--font-mono);
-  cursor: pointer;
-}
-.mapovl-collapse-btn:hover, .camctl-collapse-btn:hover, .coordbox-collapse-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+/* Collapse chip styling: covered by the generic `[class$="-collapse-btn"]`
+   rule above (Camera/Coordinates' close chip was already only ever covered
+   by the generic `[class$="-close-btn"]` rule, never a per-box one). */
 .mapovl-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -10730,21 +10689,8 @@ body.scene-playback-mode #first-run-launcher {
   letter-spacing: 0.08em;
   color: var(--text-secondary);
 }
-.hudread-collapse-btn {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: var(--text-secondary);
-  font: 700 12px/1 var(--font-mono);
-  cursor: pointer;
-}
-.hudread-collapse-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+/* Collapse chip styling: covered by the generic `[class$="-collapse-btn"]`
+   rule above. */
 .hudread-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -10901,21 +10847,8 @@ body.scene-playback-mode #first-run-launcher {
   letter-spacing: 0.08em;
   color: var(--text-secondary);
 }
-.summarybox-collapse-btn {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: var(--text-secondary);
-  font: 700 12px/1 var(--font-mono);
-  cursor: pointer;
-}
-.summarybox-collapse-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+/* Collapse chip styling: covered by the generic `[class$="-collapse-btn"]`
+   rule above. */
 .summarybox-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -11009,23 +10942,8 @@ body.scene-playback-mode #first-run-launcher {
   letter-spacing: 0.08em;
   color: var(--text-secondary);
 }
-.cachectl-close-btn,
-.cachectl-collapse-btn {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: var(--text-secondary);
-  font: 700 12px/1 var(--font-mono);
-  cursor: pointer;
-}
-.cachectl-close-btn:hover { color: #ffffff; border-color: #ffffff; }
-.cachectl-collapse-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+/* Close/collapse chip styling: covered by the generic
+   `[class$="-close-btn"]`/`[class$="-collapse-btn"]` rules above. */
 .cachectl-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -11187,21 +11105,9 @@ body.scene-playback-mode #first-run-launcher {
   letter-spacing: 0.08em;
   color: var(--text-secondary);
 }
-.restoretray-collapse-btn {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: var(--text-secondary);
-  font: 700 12px/1 var(--font-mono);
-  cursor: pointer;
-}
-.restoretray-collapse-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+/* Collapse chip styling: covered by the generic `[class$="-collapse-btn"]`
+   rule above (Restore Tray has no close/hide chip — it's `hideable: false`,
+   the panel-restore fallback itself, see `panelRestoreTray.js`). */
 .restoretray-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -11334,23 +11240,8 @@ body.scene-playback-mode #first-run-launcher {
   letter-spacing: 0.08em;
   color: var(--text-secondary);
 }
-.bathy-close-btn,
-.bathy-collapse-btn {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: var(--text-secondary);
-  font: 700 12px/1 var(--font-mono);
-  cursor: pointer;
-}
-.bathy-close-btn:hover { color: #ffffff; border-color: #ffffff; }
-.bathy-collapse-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+/* Close/collapse chip styling: covered by the generic
+   `[class$="-close-btn"]`/`[class$="-collapse-btn"]` rules above. */
 .bathy-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -11402,8 +11293,173 @@ body.scene-playback-mode #first-run-launcher {
 }
 .bathy-pad.is-collapsed .bathy-body { display: none; }
 
+/* ── Compass: standalone mini-box chrome (src/compassBox.js) ─────────────
+   True-north reference ring + local magnetic-declination needle. Same
+   movable/resizable/collapsible/hideable box mechanics as the other
+   mini-boxes (see .gpstrack-pad above); the ring/needle/hub visual
+   language matches .camctl-orient-* (the Camera box's own compass) for
+   consistency, since they're the app's two ring-and-needle instruments. */
+.compassbox-pad {
+  position: fixed;
+  z-index: 146;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--btn-radius);
+  background: var(--glass-bg);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.compassbox-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.35);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.compassbox-header.is-dragging { cursor: grabbing; }
+.compassbox-grip {
+  flex: 0 0 auto;
+  font: 700 11px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+.compassbox-title {
+  flex: 1 1 auto;
+  font: 700 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+/* Close/collapse chip styling: covered by the generic
+   `[class$="-close-btn"]`/`[class$="-collapse-btn"]` rules above. */
+.compassbox-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 7px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.compassbox-body::-webkit-scrollbar { width: 5px; }
+.compassbox-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+}
+.compassbox-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+}
+
+.compassbox-ring-wrap {
+  flex: 0 0 auto;
+  width: 62%;
+  max-width: 108px;
+  min-width: 72px;
+  aspect-ratio: 1;
+}
+.compassbox-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+.compassbox-ring {
+  fill: rgba(0, 0, 0, 0.4);
+  stroke: var(--glass-border);
+  stroke-width: 1;
+}
+.compassbox-n {
+  fill: var(--text-dim);
+  font: 700 6px var(--font-mono);
+}
+.compassbox-ew {
+  fill: var(--text-dim);
+  font: 600 5px var(--font-mono);
+  opacity: 0.6;
+}
+.compassbox-hub {
+  fill: var(--text-dim);
+}
+/* True-north needle: fixed (never rotates) — the reference every other
+   reading is measured against, so it's drawn shorter/dimmer than the
+   dynamic magnetic needle to read as "the baseline", not "the answer". */
+.compassbox-true-needle {
+  fill: var(--text-dim);
+  opacity: 0.75;
+}
+/* Magnetic-north needle: the one part of this compass that actually moves
+   — rotated per-recompute by the local declination (see compassBox.js's
+   _recompute). Bright accent so it reads as the "live" reading against the
+   dimmer fixed true-north needle behind it. */
+.compassbox-mag-needle-group {
+  transition: transform 200ms ease-out;
+}
+.compassbox-mag-needle {
+  fill: var(--accent);
+}
+
+.compassbox-legend {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 12px;
+  font: 600 9px/1 var(--font-mono);
+  color: var(--text-secondary);
+}
+.compassbox-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.compassbox-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.compassbox-swatch-true { background: var(--text-dim); opacity: 0.75; }
+.compassbox-swatch-mag { background: var(--accent); }
+
+.compassbox-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 3;
+  touch-action: none;
+}
+.compassbox-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--glass-border) 0, var(--glass-border) 1.4px,
+    transparent 1.4px, transparent 4px
+  );
+}
+.compassbox-pad.is-collapsed .compassbox-body { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .compassbox-mag-needle-group { transition: none; }
+}
+
 @media (max-width: 720px), (max-height: 520px) {
-  .mapovl-pad, .coordbox-pad, .hudread-pad, .bathy-pad, .gpstrack-pad, .about-pad, .statusbox-pad, .summarybox-pad, .cachectl-pad { display: none; }
+  .mapovl-pad, .coordbox-pad, .hudread-pad, .bathy-pad, .gpstrack-pad, .about-pad, .statusbox-pad, .summarybox-pad, .cachectl-pad, .compassbox-pad { display: none; }
   /* .restoretray-pad deliberately excluded — the Hidden Panels tray must
      stay reachable even on a small screen/viewport, or a fully-hidden
      panel would have no way back (see panelVisibility.js). */

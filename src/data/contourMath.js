@@ -27,15 +27,21 @@
  * @param {number} rows
  * @param {number} cols
  * @param {number} level - The height value to trace a contour line at.
+ * @param {?(r: number, c: number) => boolean} [cellFilter] - Optional
+ *   per-cell predicate; a cell the filter rejects contributes no segments
+ *   at all. Used by `mapOverlays.js` to suppress minor-interval contours
+ *   over cliff-steep ground (see `computeCellHeightRange`) without
+ *   touching the marching-squares math itself.
  * @returns {Array<[{x:number,y:number}, {x:number,y:number}]>}
  */
-export function marchingSquaresSegments(heights, rows, cols, level) {
+export function marchingSquaresSegments(heights, rows, cols, level, cellFilter) {
   const segments = [];
   if (rows < 2 || cols < 2) return segments;
   const at = (r, c) => heights[r * cols + c];
 
   for (let r = 0; r < rows - 1; r += 1) {
     for (let c = 0; c < cols - 1; c += 1) {
+      if (cellFilter && !cellFilter(r, c)) continue;
       const tl = at(r, c);
       const tr = at(r, c + 1);
       const bl = at(r + 1, c);
@@ -78,6 +84,47 @@ export function marchingSquaresSegments(heights, rows, cols, level) {
     }
   }
   return segments;
+}
+
+/**
+ * Per-cell relief (max corner height − min corner height) over the whole
+ * grid, one entry per marching-squares cell (`(rows-1)*(cols-1)`, row-major
+ * — `cellHeightRange[r*(cols-1)+c]`). This is the cheap, camera-independent
+ * proxy `mapOverlays.js` uses to spot cliff-steep ground: a cell whose
+ * corners already span several minor-contour intervals is a cell where
+ * every one of those minor lines is about to land within the same handful
+ * of pixels no matter how the scene is framed, so they render as a solid
+ * smear rather than legible lines (real topo maps hit the same problem and
+ * conventionally drop intermediate contours on cliffs for exactly this
+ * reason). Computed once per grid — not once per level — since it doesn't
+ * depend on which level is being traced.
+ *
+ * @param {ArrayLike<number>} heights - Row-major grid, length `rows*cols`.
+ * @param {number} rows
+ * @param {number} cols
+ * @returns {Float32Array} length `(rows-1)*(cols-1)`; a cell with any
+ *   non-finite corner gets `Infinity` (always "too steep" — never used to
+ *   suppress, since `marchingSquaresSegments` already skips it outright).
+ */
+export function computeCellHeightRange(heights, rows, cols) {
+  if (rows < 2 || cols < 2) return new Float32Array(0);
+  const at = (r, c) => heights[r * cols + c];
+  const out = new Float32Array((rows - 1) * (cols - 1));
+  let i = 0;
+  for (let r = 0; r < rows - 1; r += 1) {
+    for (let c = 0; c < cols - 1; c += 1, i += 1) {
+      const tl = at(r, c);
+      const tr = at(r, c + 1);
+      const bl = at(r + 1, c);
+      const br = at(r + 1, c + 1);
+      if (!Number.isFinite(tl) || !Number.isFinite(tr) || !Number.isFinite(bl) || !Number.isFinite(br)) {
+        out[i] = Infinity;
+        continue;
+      }
+      out[i] = Math.max(tl, tr, bl, br) - Math.min(tl, tr, bl, br);
+    }
+  }
+  return out;
 }
 
 /**

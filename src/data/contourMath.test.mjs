@@ -3,12 +3,42 @@ import assert from 'node:assert/strict';
 import {
   marchingSquaresSegments, gridToLonLat, westmostSegmentPoint,
   extremeSegmentPoint, stitchSegmentsIntoPolylines, smoothPolyline,
+  computeCellHeightRange,
 } from './contourMath.js';
 
 test('a flat grid produces no segments at any level away from its value', () => {
   const heights = [10, 10, 10, 10, 10, 10, 10, 10, 10]; // 3x3, all 10
   assert.deepEqual(marchingSquaresSegments(heights, 3, 3, 5), []);
   assert.deepEqual(marchingSquaresSegments(heights, 3, 3, 15), []);
+});
+
+test('marchingSquaresSegments skips a cell entirely when cellFilter rejects it', () => {
+  const heights = [0, 0, 10, 0, 0, 10, 10, 10, 10]; // 3x3, ramp on the right two columns
+  const withoutFilter = marchingSquaresSegments(heights, 3, 3, 5);
+  assert.ok(withoutFilter.length > 0);
+  const rejectAll = marchingSquaresSegments(heights, 3, 3, 5, () => false);
+  assert.deepEqual(rejectAll, []);
+  // Filter that only lets cell (0,0) through — a flat cell with no crossing —
+  // should also produce nothing, since the crossings live in other cells.
+  const onlyFirstCell = marchingSquaresSegments(heights, 3, 3, 5, (r, c) => r === 0 && c === 0);
+  assert.deepEqual(onlyFirstCell, []);
+});
+
+test('computeCellHeightRange reports each cell\'s corner max-min, and Infinity for a NaN corner', () => {
+  const heights = [0, 10, 20, 0, 10, 20, 0, 10, 20]; // 3x3, each column a flat step
+  const ranges = computeCellHeightRange(heights, 3, 3);
+  assert.equal(ranges.length, 4); // (rows-1)*(cols-1) = 2*2
+  // Cell (0,0): corners 0,10,0,10 -> range 10. Cell (0,1): corners 10,20,10,20 -> range 10.
+  assert.equal(ranges[0], 10);
+  assert.equal(ranges[1], 10);
+
+  const withNaN = [0, 10, 20, 0, NaN, 20, 0, 10, 20];
+  const rangesWithNaN = computeCellHeightRange(withNaN, 3, 3);
+  assert.equal(rangesWithNaN[0], Infinity); // cell (0,0) touches the NaN corner
+});
+
+test('computeCellHeightRange returns an empty array for a too-small grid', () => {
+  assert.deepEqual(computeCellHeightRange([1], 1, 1), new Float32Array(0));
 });
 
 test('a simple left-low/right-high ramp crosses down the middle column', () => {
