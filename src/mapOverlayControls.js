@@ -54,11 +54,11 @@ export class MapOverlayControls {
       title: 'MAP OVERLAYS',
       ariaLabel: 'Map overlay controls: contours, height exaggeration, and coordinate grid',
       defaultWidth: 268,
-      defaultHeight: 560,
+      defaultHeight: 620,
       minWidth: 220,
       maxWidth: 440,
       minHeight: 260,
-      maxHeight: 820,
+      maxHeight: 880,
       anchor: { right: '16px', top: '16px' },
       onHeaderBuilt: (header) => {
         const shareBtn = document.createElement('button');
@@ -218,7 +218,62 @@ export class MapOverlayControls {
     flagRow.appendChild(flagEnable);
     flagRow.appendChild(document.createTextNode('Show elevation flags'));
     flagSection.appendChild(flagRow);
-    flagSection.appendChild(el('div', 'mapovl-hint', 'Big numbered flags on major contour lines, toward the west edge of the view. Needs "Show contour lines" on to have anything to flag. Nudges clear of any control panel in the way.'));
+    flagSection.appendChild(el('div', 'mapovl-hint', 'Big numbered flags on major contour lines, toward the west edge of the view. Needs "Show contour lines" on to have anything to flag. Stay clustered near the middle of the view, clear of any control panel in the way.'));
+
+    const flagStepRow = el('label', 'mapovl-row');
+    flagStepRow.appendChild(document.createTextNode('Label frequency'));
+    const flagStepSelect = document.createElement('select');
+    flagStepSelect.className = 'mapovl-select';
+    for (const { label, value } of [
+      { label: 'Every contour', value: 1 },
+      { label: 'Every other', value: 2 },
+      { label: 'Every 3rd', value: 3 },
+      { label: 'Every 4th', value: 4 },
+    ]) {
+      const opt = document.createElement('option');
+      opt.value = String(value);
+      opt.textContent = label;
+      if (value === this.engine.state.flagLabelStep) opt.selected = true;
+      flagStepSelect.appendChild(opt);
+    }
+    flagStepRow.appendChild(flagStepSelect);
+    flagSection.appendChild(flagStepRow);
+    flagStepSelect.addEventListener('change', () => this.engine.setFlagLabelStep(Number(flagStepSelect.value)));
+
+    const flagSizeRow = el('label', 'mapovl-row');
+    flagSizeRow.appendChild(document.createTextNode('Text size'));
+    const flagSizeInput = document.createElement('input');
+    flagSizeInput.type = 'range';
+    flagSizeInput.min = '12';
+    flagSizeInput.max = '48';
+    flagSizeInput.step = '1';
+    flagSizeInput.value = String(this.engine.state.flagFontSize);
+    flagSizeRow.appendChild(flagSizeInput);
+    flagSection.appendChild(flagSizeRow);
+    flagSizeInput.addEventListener('input', () => this.engine.setFlagFontSize(Number(flagSizeInput.value)));
+
+    const flagBgColorRow = el('label', 'mapovl-row');
+    flagBgColorRow.appendChild(document.createTextNode('Background color'));
+    const flagBgColorInput = document.createElement('input');
+    flagBgColorInput.type = 'color';
+    flagBgColorInput.className = 'mapovl-color';
+    flagBgColorInput.value = this.engine.state.flagBgColor;
+    flagBgColorRow.appendChild(flagBgColorInput);
+    flagSection.appendChild(flagBgColorRow);
+    flagBgColorInput.addEventListener('input', () => this.engine.setFlagBgColor(flagBgColorInput.value));
+
+    const flagBgAlphaRow = el('label', 'mapovl-row');
+    flagBgAlphaRow.appendChild(document.createTextNode('Background transparency'));
+    const flagBgAlphaInput = document.createElement('input');
+    flagBgAlphaInput.type = 'range';
+    flagBgAlphaInput.min = '0';
+    flagBgAlphaInput.max = '1';
+    flagBgAlphaInput.step = '0.05';
+    flagBgAlphaInput.value = String(this.engine.state.flagBgAlpha);
+    flagBgAlphaRow.appendChild(flagBgAlphaInput);
+    flagSection.appendChild(flagBgAlphaRow);
+    flagBgAlphaInput.addEventListener('input', () => this.engine.setFlagBgAlpha(Number(flagBgAlphaInput.value)));
+
     body.appendChild(flagSection);
 
     flagEnable.addEventListener('change', () => this.engine.setContourFlagsEnabled(flagEnable.checked));
@@ -239,6 +294,10 @@ export class MapOverlayControls {
       gridColorInput.value = this.engine.state.gridColor;
       labelEnable.checked = false;
       flagEnable.checked = false;
+      flagStepSelect.value = String(this.engine.state.flagLabelStep);
+      flagSizeInput.value = String(this.engine.state.flagFontSize);
+      flagBgColorInput.value = this.engine.state.flagBgColor;
+      flagBgAlphaInput.value = String(this.engine.state.flagBgAlpha);
       this._setContourStatus('');
     });
     body.appendChild(resetBtn);

@@ -39,12 +39,12 @@ export class BathymetryBox {
       storagePrefix: 'godsEyeView.bathymetryBox.',
       title: 'BATHYMETRY',
       ariaLabel: 'Bathymetry controls: undersea depth contours and depth markers',
-      defaultWidth: 240,
-      defaultHeight: 260,
+      defaultWidth: 250,
+      defaultHeight: 380,
       minWidth: 200,
       maxWidth: 400,
       minHeight: 180,
-      maxHeight: 460,
+      maxHeight: 560,
       anchor: { right: '16px', top: '160px' },
       onHeaderBuilt: (header) => {
         const closeBtn = document.createElement('button');
@@ -97,10 +97,64 @@ export class BathymetryBox {
     section.appendChild(flagRow);
     flagEnable.addEventListener('change', () => this.engine.setDepthFlagsEnabled(flagEnable.checked));
 
+    const flagStepRow = el('label', 'mapovl-row');
+    flagStepRow.appendChild(document.createTextNode('Label frequency'));
+    const flagStepSelect = document.createElement('select');
+    flagStepSelect.className = 'mapovl-select';
+    for (const { label, value } of [
+      { label: 'Every contour', value: 1 },
+      { label: 'Every other', value: 2 },
+      { label: 'Every 3rd', value: 3 },
+      { label: 'Every 4th', value: 4 },
+    ]) {
+      const opt = document.createElement('option');
+      opt.value = String(value);
+      opt.textContent = label;
+      if (value === this.engine.state.flagLabelStep) opt.selected = true;
+      flagStepSelect.appendChild(opt);
+    }
+    flagStepRow.appendChild(flagStepSelect);
+    section.appendChild(flagStepRow);
+    flagStepSelect.addEventListener('change', () => this.engine.setFlagLabelStep(Number(flagStepSelect.value)));
+
+    const flagSizeRow = el('label', 'mapovl-row');
+    flagSizeRow.appendChild(document.createTextNode('Text size'));
+    const flagSizeInput = document.createElement('input');
+    flagSizeInput.type = 'range';
+    flagSizeInput.min = '12';
+    flagSizeInput.max = '48';
+    flagSizeInput.step = '1';
+    flagSizeInput.value = String(this.engine.state.flagFontSize);
+    flagSizeRow.appendChild(flagSizeInput);
+    section.appendChild(flagSizeRow);
+    flagSizeInput.addEventListener('input', () => this.engine.setFlagFontSize(Number(flagSizeInput.value)));
+
+    const flagBgColorRow = el('label', 'mapovl-row');
+    flagBgColorRow.appendChild(document.createTextNode('Background color'));
+    const flagBgColorInput = document.createElement('input');
+    flagBgColorInput.type = 'color';
+    flagBgColorInput.className = 'mapovl-color';
+    flagBgColorInput.value = this.engine.state.flagBgColor;
+    flagBgColorRow.appendChild(flagBgColorInput);
+    section.appendChild(flagBgColorRow);
+    flagBgColorInput.addEventListener('input', () => this.engine.setFlagBgColor(flagBgColorInput.value));
+
+    const flagBgAlphaRow = el('label', 'mapovl-row');
+    flagBgAlphaRow.appendChild(document.createTextNode('Background transparency'));
+    const flagBgAlphaInput = document.createElement('input');
+    flagBgAlphaInput.type = 'range';
+    flagBgAlphaInput.min = '0';
+    flagBgAlphaInput.max = '1';
+    flagBgAlphaInput.step = '0.05';
+    flagBgAlphaInput.value = String(this.engine.state.flagBgAlpha);
+    flagBgAlphaRow.appendChild(flagBgAlphaInput);
+    section.appendChild(flagBgAlphaRow);
+    flagBgAlphaInput.addEventListener('input', () => this.engine.setFlagBgAlpha(Number(flagBgAlphaInput.value)));
+
     section.appendChild(el(
       'div',
       'mapovl-hint',
-      'Isobaths and depth readouts: GEBCO grid via opentopodata.org (public, no key, rate-limited — cached once looked up). Depth flags need "Show depth contours" on, and nudge clear of any control panel in the way.',
+      'Isobaths and depth readouts: GEBCO grid via opentopodata.org (public, no key, rate-limited — cached once looked up). Depth flags need "Show depth contours" on, and stay clustered near the middle of the view, clear of any control panel in the way.',
     ));
 
     body.appendChild(section);

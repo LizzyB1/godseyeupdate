@@ -4,7 +4,8 @@ import { formatLatLonDMS, formatLatLonDecimal, googleMapsLink, formatHeight, toD
 import { resolveApiKey } from '../apiKeys.js';
 import { sampleSceneHeights } from './sceneHeight.js';
 import { getSharedCache } from './apiCache.js';
-import { buildContourFlags, installFlagAvoidance } from './contourFlags.js';
+import { buildContourFlags, installFlagAvoidance, thinSpotsByStep, DEFAULT_FLAG_FONT_SIZE, DEFAULT_FLAG_BG_ALPHA } from './contourFlags.js';
+import { LAND_CONTOUR_PALETTE, paletteColorHex } from './contourColors.js';
 
 /**
  * @file Cesium-facing engine behind the "Map Overlays" control box: elevation
@@ -75,6 +76,16 @@ export const DEFAULT_STATE = Object.freeze({
   // (grid) and from `contoursEnabled` (the lines themselves): the flags can
   // be shown/hidden independently of both. See `data/contourFlags.js`.
   contourFlagsEnabled: false,
+  // Flag label style — independent of the contour LINE colors (which cycle
+  // through data/contourColors.js's palette): the plaque background is a
+  // single user-picked color/opacity/text-size, same idea as the existing
+  // grid-color picker.
+  flagFontSize: DEFAULT_FLAG_FONT_SIZE,
+  flagBgColor: '#c62828',
+  flagBgAlpha: DEFAULT_FLAG_BG_ALPHA,
+  // "Label every contour / every other / every 3rd…" — 1 = every major
+  // contour line gets a flag (today's behavior), 2 = every other, etc.
+  flagLabelStep: 1,
 });
 
 /** Font for grid/contour line value labels — deliberately large, per the
@@ -246,6 +257,57 @@ export class MapOverlaysEngine {
   _clearContourFlags() {
     this._contourFlagDataSource.entities.removeAll();
     this._contourFlagEntities = [];
+    this._lastFlagSpotByLevel = null;
+    this._lastLevelPaletteIndex = null;
+  }
+
+  // ── contour flag label style ────────────────────────────────────────
+  setFlagFontSize(px) {
+    this.state.flagFontSize = Cesium.Math.clamp(Number(px) || DEFAULT_FLAG_FONT_SIZE, 12, 48);
+    this._persist();
+    if (this.state.contourFlagsEnabled) this._rebuildContourFlagsOnly();
+  }
+
+  setFlagBgColor(hex) {
+    this.state.flagBgColor = hex || DEFAULT_STATE.flagBgColor;
+    this._persist();
+    if (this.state.contourFlagsEnabled) this._rebuildContourFlagsOnly();
+  }
+
+  setFlagBgAlpha(alpha) {
+    this.state.flagBgAlpha = Cesium.Math.clamp(Number(alpha), 0, 1);
+    this._persist();
+    if (this.state.contourFlagsEnabled) this._rebuildContourFlagsOnly();
+  }
+
+  setFlagLabelStep(step) {
+    this.state.flagLabelStep = Math.max(1, Math.round(Number(step)) || 1);
+    this._persist();
+    if (this.state.contourFlagsEnabled) this._rebuildContourFlagsOnly();
+  }
+
+  /** Re-draws just the flag layer from the last-computed contour spots, without a full re-sample of scene heights — used when only a label-style control (font/bg/step) changes. */
+  _rebuildContourFlagsOnly() {
+    if (!this._lastFlagSpotByLevel) return;
+    this._applyContourFlags(this._lastFlagSpotByLevel);
+  }
+
+  /** Builds (or clears) the flag layer from a full `Map<level, spot>` — applies the frequency thinning and current label style. `levelPaletteIndex` maps each level to the palette index its contour LINE was drawn with, so a flag's pole always matches its line even after thinning changes iteration order. */
+  _applyContourFlags(flagSpotByLevel, levelPaletteIndex = this._lastLevelPaletteIndex) {
+    this._lastFlagSpotByLevel = flagSpotByLevel;
+    this._lastLevelPaletteIndex = levelPaletteIndex;
+    if (!this.state.contourFlagsEnabled) { this._clearContourFlags(); return; }
+    const thinned = thinSpotsByStep(flagSpotByLevel, this.state.flagLabelStep);
+    this._contourFlagEntities = buildContourFlags({
+      viewer: this.viewer,
+      dataSource: this._contourFlagDataSource,
+      spots: thinned,
+      formatValue: formatHeight,
+      poleColorForLevel: (level) => Cesium.Color.fromCssColorString(paletteColorHex(LAND_CONTOUR_PALETTE, levelPaletteIndex?.get(level) ?? 0)),
+      bgColor: Cesium.Color.fromCssColorString(this.state.flagBgColor),
+      bgAlpha: this.state.flagBgAlpha,
+      fontSize: this.state.flagFontSize,
+    });
   }
 
   _clearGridLabels() {
@@ -333,8 +395,14 @@ export class MapOverlaysEngine {
       }
     }
 
-    const majorColor = Cesium.Color.fromCssColorString('#ffd60a').withAlpha(0.85);
-    const minorColor = Cesium.Color.fromCssColorString('#ffd60a').withAlpha(0.35);
+    // Sorted by height (not push order — majors and minors are pushed in
+    // two separate passes above) so that a level's index reflects its
+    // actual neighbors on screen: consecutive palette colors then land on
+    // lines that are genuinely next to each other, giving real
+    // "contrast between neighbours" rather than an arbitrary one.
+    const sortedLevels = [...levels].sort((a, b) => a.height - b.height);
+    const levelPaletteIndex = new Map(sortedLevels.map((lvl, i) => [lvl.height, i]));
+    const colorForLevel = (height) => Cesium.Color.fromCssColorString(paletteColorHex(LAND_CONTOUR_PALETTE, levelPaletteIndex.get(height) ?? 0));
 
     // For each major level, remember whichever segment endpoint sits
     // closest to the view's west edge — that's where its flag goes (see
@@ -346,8 +414,9 @@ export class MapOverlaysEngine {
 
     const newPrimitive = new Cesium.PolylineCollection();
     let segmentCount = 0;
-    for (const { height, major: isMajor } of levels) {
+    for (const { height, major: isMajor } of sortedLevels) {
       const segs = marchingSquaresSegments(heights, rows, cols, height);
+      const lineColor = colorForLevel(height).withAlpha(isMajor ? 0.85 : 0.35);
       for (const [a, b] of segs) {
         const aLL = gridToLonLat(a.x, a.y, rows, cols, west, south, east, north);
         const bLL = gridToLonLat(b.x, b.y, rows, cols, west, south, east, north);
@@ -357,7 +426,7 @@ export class MapOverlaysEngine {
             Cesium.Cartesian3.fromDegrees(bLL.lon, bLL.lat, height),
           ],
           width: isMajor ? 2 : 1,
-          material: Cesium.Material.fromType('Color', { color: isMajor ? majorColor : minorColor }),
+          material: Cesium.Material.fromType('Color', { color: lineColor }),
         });
         segmentCount += 1;
       }
@@ -378,17 +447,7 @@ export class MapOverlaysEngine {
       this._setStatus(`Flat here — ${Math.round(minH)}–${Math.round(maxH)} m relief, no contour crossing.`);
     }
 
-    if (this.state.contourFlagsEnabled) {
-      this._contourFlagEntities = buildContourFlags({
-        viewer: this.viewer,
-        dataSource: this._contourFlagDataSource,
-        spots: flagSpotByLevel,
-        formatValue: formatHeight,
-        color: majorColor,
-      });
-    } else {
-      this._clearContourFlags();
-    }
+    this._applyContourFlags(flagSpotByLevel, levelPaletteIndex);
   }
 
   // ── lat/lon grid ─────────────────────────────────────────────────────

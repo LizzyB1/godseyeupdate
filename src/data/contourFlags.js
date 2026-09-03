@@ -10,34 +10,47 @@ import { PANEL_LABELS } from '../panelVisibility.js';
  * differently (raw primitive collections vs. entities) but want visually
  * identical, equally "obvious" flags for the numbers.
  *
- * Two responsibilities live here:
+ * Three responsibilities live here:
  *  1. `buildContourFlags` — turn a `Map<level, {lon,lat}>` of per-level flag
- *     spots into pole+label entities in a `CustomDataSource`.
- *  2. `installFlagAvoidance` — keep those labels from sitting hidden behind
- *     one of the app's draggable mini-box control panels. Panels move
- *     (drag), resize, collapse, and hide independently of the map and of
- *     each other, so a flag's on-screen position is checked continuously
- *     (every rendered frame, via `scene.postRender` — the same "recompute
- *     every rendered frame" pattern `cameraControls.js`'s live orientation
- *     readout already uses) rather than once at placement time. A flag
- *     whose natural position lands under a panel gets nudged right, clear
- *     of that panel's edge, via the label's `pixelOffset` — its underlying
+ *     spots into pole+label entities in a `CustomDataSource`. Text size and
+ *     plaque background color/transparency are caller-supplied (each engine
+ *     persists its own — see its box's "label style" controls) rather than
+ *     fixed, so the two layers can be tuned independently; the pole itself
+ *     always uses the per-level contour color passed in via `poleColorForLevel`
+ *     (see `data/contourColors.js`), so a flag's pole always matches the line
+ *     it's planted on.
+ *  2. `installFlagAvoidance` — keep those labels readable and clear of the
+ *     app's draggable mini-box control panels, via two per-frame nudges
+ *     (`scene.postRender` — the same "recompute every rendered frame"
+ *     pattern `cameraControls.js`'s live orientation readout already uses):
+ *      a. Center-circle clamp — a flag whose true screen position drifts
+ *         out past a circle centered on the viewport gets its LABEL (not
+ *         its pole/line, which stay at the real position) pulled back onto
+ *         that circle's edge, so labels always stay clustered in the
+ *         readable middle of the view instead of piling up at the edges.
+ *      b. Panel avoidance — from that (possibly already-clamped) position,
+ *         a label still sitting under a visible control panel gets nudged
+ *         right, clear of that panel's edge.
+ *     Both nudges apply only to the label's `pixelOffset`; the underlying
  *     world position (and the pole drawn from it) never moves, so panning
- *     back out from under the panel snaps it right back to its true spot.
+ *     the true spot back into the clear snaps the label right back to it.
  *
  * @module data/contourFlags
  */
 
-/** Big, bold, high-contrast — the point of a "flag" is to be unmissable, not to blend in like the rest of the HUD. */
-const FLAG_FONT = '700 22px sans-serif';
 /** How far above the contour line's own point the flag sits, as a fraction of current camera altitude (clamped) — purely a visual attachment device, not to scale. */
 const POLE_RISE_FRACTION = 0.12;
 const MIN_POLE_RISE_M = 15;
 const MAX_POLE_RISE_M = 4000;
-/** Label's resting offset above its world anchor (the pole tip), before any panel-avoidance nudge is added. */
+/** Label's resting offset above its world anchor (the pole tip), before any center-circle/panel-avoidance nudge is added. */
 const BASE_LABEL_OFFSET = new Cesium.Cartesian2(0, -4);
 /** Extra clearance kept past an obstructing panel's edge once a flag is nudged clear of it. */
 const AVOIDANCE_MARGIN_PX = 14;
+/** Default plaque text size/background if a caller doesn't supply its own — matches the flags' original look. */
+export const DEFAULT_FLAG_FONT_SIZE = 22;
+export const DEFAULT_FLAG_BG_ALPHA = 0.92;
+/** Radius of the "stay near the middle" circle, as a fraction of the shorter canvas dimension — a comfortable central cluster with margin left for edge-docked panels/HUD chrome. */
+const CENTER_CIRCLE_RADIUS_FRACTION = 0.38;
 
 /** Every mini-box / hideable-panel root id known to the app — the full set `installFlagAvoidance` checks flags against. Sourced from `panelVisibility.js`'s registry (the hideable panels) plus every `buildMiniBox` instance (not all of which are hideable), so a flag is nudged clear of ANY visible control box, not just the ones with a "×" hide button. */
 const MINIBOX_PANEL_IDS = ['restoretray-pad', 'mapovl-pad', 'coordbox-pad', 'hudread-pad', 'bathy-pad', 'camctl-pad', 'gpstrack-pad'];
@@ -50,6 +63,12 @@ function poleRiseMeters(viewer) {
   return Cesium.Math.clamp(alt * POLE_RISE_FRACTION, MIN_POLE_RISE_M, MAX_POLE_RISE_M);
 }
 
+/** True if `color` is light enough that black plaque text reads better than white on it (simple relative-luminance threshold). */
+function isLightColor(color) {
+  const luminance = 0.299 * color.red + 0.587 * color.green + 0.114 * color.blue;
+  return luminance > 0.5;
+}
+
 /**
  * (Re)build flag entities into `dataSource`, one per `[level, {lon,lat}]`
  * entry in `spots`. Clears whatever was there before.
@@ -58,15 +77,24 @@ function poleRiseMeters(viewer) {
  * @param {Cesium.CustomDataSource} opts.dataSource - dedicated to flags; cleared and repopulated each call.
  * @param {Map<number, {lon:number, lat:number}>} opts.spots - per-level flag anchor, in the contour's own coordinate space (level = height above ellipsoid the line is drawn at — negative for depth).
  * @param {(level:number)=>string} opts.formatValue - e.g. `formatHeight`/`formatDepth`.
- * @param {Cesium.Color} opts.color - flag color (pole + background box).
+ * @param {(level:number, index:number)=>Cesium.Color} opts.poleColorForLevel - the pole/line color for a given level and its position (index) in the spot iteration order — normally the same per-level palette color the contour line itself was drawn with, so the flag visually matches its line.
+ * @param {Cesium.Color} opts.bgColor - plaque background color (RGB only — alpha comes from `bgAlpha`).
+ * @param {number} [opts.bgAlpha] - plaque background opacity, 0-1. Defaults to {@link DEFAULT_FLAG_BG_ALPHA}.
+ * @param {number} [opts.fontSize] - plaque text size in px. Defaults to {@link DEFAULT_FLAG_FONT_SIZE}.
  * @returns {Array<Cesium.Entity>} the new flag entities (for `installFlagAvoidance`'s `getEntities`).
  */
-export function buildContourFlags({ viewer, dataSource, spots, formatValue, color }) {
+export function buildContourFlags({ viewer, dataSource, spots, formatValue, poleColorForLevel, bgColor, bgAlpha = DEFAULT_FLAG_BG_ALPHA, fontSize = DEFAULT_FLAG_FONT_SIZE }) {
   dataSource.entities.removeAll();
   if (!spots.size) return [];
   const rise = poleRiseMeters(viewer);
+  const font = `700 ${Math.round(fontSize)}px sans-serif`;
+  const background = bgColor.withAlpha(Cesium.Math.clamp(bgAlpha, 0, 1));
+  const textColor = isLightColor(background) ? Cesium.Color.BLACK : Cesium.Color.WHITE;
   const entities = [];
+  let index = 0;
   for (const [level, spot] of spots) {
+    const poleColor = poleColorForLevel(level, index);
+    index += 1;
     const basePos = Cesium.Cartesian3.fromDegrees(spot.lon, spot.lat, level);
     const topPos = Cesium.Cartesian3.fromDegrees(spot.lon, spot.lat, level + rise);
     const entity = dataSource.entities.add({
@@ -74,15 +102,15 @@ export function buildContourFlags({ viewer, dataSource, spots, formatValue, colo
       polyline: {
         positions: [basePos, topPos],
         width: 3,
-        material: color,
+        material: poleColor,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
         text: formatValue(level),
-        font: FLAG_FONT,
-        fillColor: Cesium.Color.BLACK,
+        font,
+        fillColor: textColor,
         showBackground: true,
-        backgroundColor: color.withAlpha(0.92),
+        backgroundColor: background,
         backgroundPadding: new Cesium.Cartesian2(10, 6),
         style: Cesium.LabelStyle.FILL,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
@@ -94,6 +122,26 @@ export function buildContourFlags({ viewer, dataSource, spots, formatValue, colo
     entities.push(entity);
   }
   return entities;
+}
+
+/**
+ * Selects every Nth entry from an ordered `Map`, preserving insertion order
+ * — the "label every contour / every other contour / every 3rd…" frequency
+ * control. `step` of 1 keeps everything (today's behavior).
+ * @param {Map<number, {lon:number, lat:number}>} spots
+ * @param {number} step - 1-based; only every `step`th entry (by iteration order) is kept.
+ * @returns {Map<number, {lon:number, lat:number}>}
+ */
+export function thinSpotsByStep(spots, step) {
+  const n = Math.max(1, Math.round(step) || 1);
+  if (n <= 1) return spots;
+  const out = new Map();
+  let i = 0;
+  for (const [level, spot] of spots) {
+    if (i % n === 0) out.set(level, spot);
+    i += 1;
+  }
+  return out;
 }
 
 /** Every currently-visible avoidance-relevant panel's bounding rect (viewport coords). Elements resolve once each and are cached by id — the app's mini-box/panel roots are created once at startup and never recreated, only shown/hidden — but a lookup is retried on every call for any id not yet resolved, in case this runs before every panel exists (construction order between engines and their control boxes isn't guaranteed), so nothing is permanently missed. */
@@ -137,10 +185,36 @@ export function computePanelAvoidanceOffset(screenX, screenY) {
 }
 
 /**
+ * Given a flag's natural (unshifted) screen position and the current
+ * viewport size, return the point on screen it should actually render at:
+ * unchanged if it's already within {@link CENTER_CIRCLE_RADIUS_FRACTION} of
+ * the viewport's center, otherwise pulled straight in along the same
+ * center→point line until it lands exactly on that circle's edge. This is
+ * what keeps flags clustered in the readable middle of the view rather than
+ * drifting out toward the (often panel-crowded) edges as the camera pans —
+ * "the labels stay in a circle in mid viewport."
+ * @param {number} screenX @param {number} screenY
+ * @param {number} canvasWidth @param {number} canvasHeight
+ * @returns {{x:number, y:number}} the (possibly clamped) target screen position.
+ */
+export function clampToCenterCircle(screenX, screenY, canvasWidth, canvasHeight) {
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const radius = Math.min(canvasWidth, canvasHeight) * CENTER_CIRCLE_RADIUS_FRACTION;
+  const dx = screenX - centerX;
+  const dy = screenY - centerY;
+  const dist = Math.hypot(dx, dy);
+  if (dist <= radius || dist === 0) return { x: screenX, y: screenY };
+  const scale = radius / dist;
+  return { x: centerX + dx * scale, y: centerY + dy * scale };
+}
+
+/**
  * Install a `scene.postRender` listener that keeps every entity returned by
- * `getEntities()` clear of the app's currently-visible panels, by adjusting
- * each entity's `label.pixelOffset` in place every frame. Cheap and
- * idempotent per call; returns a remover.
+ * `getEntities()` clustered near the viewport's center (see
+ * {@link clampToCenterCircle}) and clear of the app's currently-visible
+ * panels, by adjusting each entity's `label.pixelOffset` in place every
+ * frame. Cheap and idempotent per call; returns a remover.
  * @param {Cesium.Viewer} viewer
  * @param {() => Array<Cesium.Entity>} getEntities - called fresh each frame, so a rebuilt flag set is picked up automatically.
  * @returns {() => void} call to uninstall.
@@ -151,14 +225,21 @@ export function installFlagAvoidance(viewer, getEntities) {
     const entities = getEntities();
     if (!entities || !entities.length) return;
     Cesium.JulianDate.now(now);
+    const canvas = viewer.scene.canvas;
     for (const entity of entities) {
       if (!entity.label || entity.isDestroyed?.()) continue;
       const pos = entity.position?.getValue(now);
       if (!pos) continue;
       const screen = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, pos);
       if (!screen) continue;
-      const avoid = computePanelAvoidanceOffset(screen.x, screen.y);
-      entity.label.pixelOffset = new Cesium.Cartesian2(BASE_LABEL_OFFSET.x + avoid.x, BASE_LABEL_OFFSET.y + avoid.y);
+      const clamped = clampToCenterCircle(screen.x, screen.y, canvas.clientWidth, canvas.clientHeight);
+      const avoid = computePanelAvoidanceOffset(clamped.x, clamped.y);
+      const targetX = clamped.x + avoid.x;
+      const targetY = clamped.y + avoid.y;
+      entity.label.pixelOffset = new Cesium.Cartesian2(
+        BASE_LABEL_OFFSET.x + (targetX - screen.x),
+        BASE_LABEL_OFFSET.y + (targetY - screen.y),
+      );
     }
   };
   const remove = viewer.scene.postRender.addEventListener(handler);

@@ -2,7 +2,8 @@ import * as Cesium from 'cesium';
 import { getSharedCache } from './apiCache.js';
 import { registerDynamicCredit, GEBCO_DEPTH_CREDIT } from './dataCredits.js';
 import { marchingSquaresSegments, gridToLonLat, westmostSegmentPoint } from './contourMath.js';
-import { buildContourFlags, installFlagAvoidance } from './contourFlags.js';
+import { buildContourFlags, installFlagAvoidance, thinSpotsByStep, DEFAULT_FLAG_FONT_SIZE, DEFAULT_FLAG_BG_ALPHA } from './contourFlags.js';
+import { DEPTH_CONTOUR_PALETTE, paletteColorHex } from './contourColors.js';
 
 /**
  * @file Cesium-facing engine behind the "Bathymetry" control box: undersea
@@ -82,7 +83,6 @@ const GRID_CACHE_PRECISION = 2; // decimal degrees (~1.1km) — cache key roundi
 // fails a browser-side fetch(). Same query/response shape either way.
 const OPENTOPODATA_URL = '/api/bathymetry';
 
-const CONTOUR_COLOR = Cesium.Color.fromCssColorString('#ffe600');
 const MARKER_TEXT_COLOR = Cesium.Color.fromCssColorString('#bfe6ff');
 
 export const DEFAULT_STATE = Object.freeze({
@@ -93,6 +93,15 @@ export const DEFAULT_STATE = Object.freeze({
   // lines themselves), though it has nothing to draw unless contours are
   // also being computed. See data/contourFlags.js.
   depthFlagsEnabled: false,
+  // Flag label style — independent of the contour LINE colors (which cycle
+  // through data/contourColors.js's depth palette): the plaque background
+  // is a single user-picked color/opacity/text-size.
+  flagFontSize: DEFAULT_FLAG_FONT_SIZE,
+  flagBgColor: '#8e24aa',
+  flagBgAlpha: DEFAULT_FLAG_BG_ALPHA,
+  // "Label every contour / every other / every 3rd…" — 1 = every depth
+  // level gets a flag (today's behavior), 2 = every other, etc.
+  flagLabelStep: 1,
 });
 
 function loadState() {
@@ -238,6 +247,57 @@ export class BathymetryEngine {
   _clearDepthFlags() {
     this._flagDataSource.entities.removeAll();
     this._flagEntities = [];
+    this._lastFlagSpotByLevel = null;
+    this._lastLevelPaletteIndex = null;
+  }
+
+  // ── depth flag label style ──────────────────────────────────────────
+  setFlagFontSize(px) {
+    this.state.flagFontSize = Cesium.Math.clamp(Number(px) || DEFAULT_FLAG_FONT_SIZE, 12, 48);
+    this._persist();
+    if (this.state.depthFlagsEnabled) this._rebuildDepthFlagsOnly();
+  }
+
+  setFlagBgColor(hex) {
+    this.state.flagBgColor = hex || DEFAULT_STATE.flagBgColor;
+    this._persist();
+    if (this.state.depthFlagsEnabled) this._rebuildDepthFlagsOnly();
+  }
+
+  setFlagBgAlpha(alpha) {
+    this.state.flagBgAlpha = Cesium.Math.clamp(Number(alpha), 0, 1);
+    this._persist();
+    if (this.state.depthFlagsEnabled) this._rebuildDepthFlagsOnly();
+  }
+
+  setFlagLabelStep(step) {
+    this.state.flagLabelStep = Math.max(1, Math.round(Number(step)) || 1);
+    this._persist();
+    if (this.state.depthFlagsEnabled) this._rebuildDepthFlagsOnly();
+  }
+
+  /** Re-draws just the flag layer from the last-computed depth spots, without a full re-fetch — used when only a label-style control (font/bg/step) changes. */
+  _rebuildDepthFlagsOnly() {
+    if (!this._lastFlagSpotByLevel) return;
+    this._applyDepthFlags(this._lastFlagSpotByLevel);
+  }
+
+  /** Builds (or clears) the flag layer from a full `Map<level, spot>` — applies the frequency thinning and current label style. `levelPaletteIndex` maps each level to the palette index its contour LINE was drawn with, so a flag's pole always matches its line even after thinning changes iteration order. */
+  _applyDepthFlags(flagSpotByLevel, levelPaletteIndex = this._lastLevelPaletteIndex) {
+    this._lastFlagSpotByLevel = flagSpotByLevel;
+    this._lastLevelPaletteIndex = levelPaletteIndex;
+    if (!this.state.depthFlagsEnabled) { this._clearDepthFlags(); return; }
+    const thinned = thinSpotsByStep(flagSpotByLevel, this.state.flagLabelStep);
+    this._flagEntities = buildContourFlags({
+      viewer: this.viewer,
+      dataSource: this._flagDataSource,
+      spots: thinned,
+      formatValue: formatDepth,
+      poleColorForLevel: (level) => Cesium.Color.fromCssColorString(paletteColorHex(DEPTH_CONTOUR_PALETTE, levelPaletteIndex?.get(level) ?? 0)),
+      bgColor: Cesium.Color.fromCssColorString(this.state.flagBgColor),
+      bgAlpha: this.state.flagBgAlpha,
+      fontSize: this.state.flagFontSize,
+    });
   }
 
   _onCameraMoveEnd() {
@@ -371,12 +431,19 @@ export class BathymetryEngine {
     // not just the "major" (round-thousand) ones: at ocean scale even the
     // finer bands (10/20/50/100/200/500 m) are worth calling out by number.
     const flagSpotByLevel = new Map();
+    // `levels` is already in CONTOUR_LEVELS' fixed monotonic order, so its
+    // array index doubles as each level's position for palette-color
+    // cycling — consecutive (on-screen-neighboring) levels land on
+    // contrasting colors.
+    const levelPaletteIndex = new Map(levels.map((lvl, i) => [lvl, i]));
+    const colorForLevel = (level) => Cesium.Color.fromCssColorString(paletteColorHex(DEPTH_CONTOUR_PALETTE, levelPaletteIndex.get(level) ?? 0));
 
     this._contourDataSource.entities.removeAll();
     let segmentCount = 0;
     for (const level of levels) {
       if (segmentCount >= MAX_CONTOUR_FEATURES) break;
       const isMajor = Math.abs(level) % 1000 === 0;
+      const lineColor = colorForLevel(level).withAlpha(isMajor ? 0.9 : 0.55);
       const segments = marchingSquaresSegments(heights, rows, cols, level);
       for (const [a, b] of segments) {
         if (segmentCount >= MAX_CONTOUR_FEATURES) break;
@@ -387,7 +454,7 @@ export class BathymetryEngine {
           polyline: {
             positions,
             width: isMajor ? 2.5 : 1.25,
-            material: CONTOUR_COLOR.withAlpha(isMajor ? 0.9 : 0.55),
+            material: lineColor,
             clampToGround: false,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
@@ -402,17 +469,7 @@ export class BathymetryEngine {
       ? `${segmentCount} isobath segment${segmentCount === 1 ? '' : 's'} · GEBCO`
       : 'No depth contours in this view (likely over land or a uniform depth band).';
 
-    if (this.state.depthFlagsEnabled) {
-      this._flagEntities = buildContourFlags({
-        viewer: this.viewer,
-        dataSource: this._flagDataSource,
-        spots: flagSpotByLevel,
-        formatValue: formatDepth,
-        color: CONTOUR_COLOR,
-      });
-    } else {
-      this._clearDepthFlags();
-    }
+    this._applyDepthFlags(flagSpotByLevel, levelPaletteIndex);
   }
 
   // ── depth markers (subsample of the same shared grid) ───────────────
