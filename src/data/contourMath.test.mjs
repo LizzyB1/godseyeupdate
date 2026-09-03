@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { marchingSquaresSegments, gridToLonLat, westmostSegmentPoint } from './contourMath.js';
+import {
+  marchingSquaresSegments, gridToLonLat, westmostSegmentPoint,
+  extremeSegmentPoint, stitchSegmentsIntoPolylines, smoothPolyline,
+} from './contourMath.js';
 
 test('a flat grid produces no segments at any level away from its value', () => {
   const heights = [10, 10, 10, 10, 10, 10, 10, 10, 10]; // 3x3, all 10
@@ -80,4 +83,100 @@ test('westmostSegmentPoint is stable when every endpoint shares the same longitu
   const result = westmostSegmentPoint(segments, 3, 3, bounds.west, bounds.south, bounds.east, bounds.north);
   assert.equal(result.lon, 0);
   assert.ok(result.lat === 50 || result.lat === 30);
+});
+
+test('extremeSegmentPoint picks east/north/south correctly, matching westmostSegmentPoint for west', () => {
+  const bounds = { west: -10, south: 30, east: 10, north: 50 };
+  const segments = [
+    [{ x: 2, y: 0 }, { x: 2, y: 2 }], // lon = 10 (east edge), lat spans 50..30
+    [{ x: 0, y: 1 }, { x: 1, y: 1 }], // lon = -10 (west edge), lon = 0
+  ];
+  const east = extremeSegmentPoint(segments, 3, 3, bounds.west, bounds.south, bounds.east, bounds.north, 'east');
+  assert.equal(east.lon, 10);
+  const north = extremeSegmentPoint(segments, 3, 3, bounds.west, bounds.south, bounds.east, bounds.north, 'north');
+  assert.equal(north.lat, 50);
+  const south = extremeSegmentPoint(segments, 3, 3, bounds.west, bounds.south, bounds.east, bounds.north, 'south');
+  assert.equal(south.lat, 30);
+  const west = extremeSegmentPoint(segments, 3, 3, bounds.west, bounds.south, bounds.east, bounds.north, 'west');
+  assert.deepEqual(west, westmostSegmentPoint(segments, 3, 3, bounds.west, bounds.south, bounds.east, bounds.north));
+});
+
+test('extremeSegmentPoint returns null for an empty segment list', () => {
+  assert.equal(extremeSegmentPoint([], 3, 3, -10, 30, 10, 50, 'north'), null);
+});
+
+test('stitchSegmentsIntoPolylines joins two segments sharing an endpoint into one open chain', () => {
+  const segments = [
+    [{ x: 0, y: 0 }, { x: 1, y: 0 }],
+    [{ x: 1, y: 0 }, { x: 2, y: 1 }],
+  ];
+  const chains = stitchSegmentsIntoPolylines(segments);
+  assert.equal(chains.length, 1);
+  assert.equal(chains[0].closed, false);
+  assert.deepEqual(chains[0].points, [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 1 }]);
+});
+
+test('stitchSegmentsIntoPolylines joins segments arriving in scattered order, reversing as needed', () => {
+  const segments = [
+    [{ x: 2, y: 1 }, { x: 1, y: 0 }], // reversed relative to chain direction
+    [{ x: 3, y: 2 }, { x: 2, y: 1 }], // shares end with first segment's start
+    [{ x: 0, y: 0 }, { x: 1, y: 0 }],
+  ];
+  const chains = stitchSegmentsIntoPolylines(segments);
+  assert.equal(chains.length, 1);
+  assert.equal(chains[0].closed, false);
+  assert.equal(chains[0].points.length, 4);
+  // Endpoints of the fully-joined chain must be the two never-shared ends.
+  const ends = [chains[0].points[0], chains[0].points[chains[0].points.length - 1]];
+  const hasPoint = (p) => ends.some((e) => e.x === p.x && e.y === p.y);
+  assert.ok(hasPoint({ x: 0, y: 0 }));
+  assert.ok(hasPoint({ x: 3, y: 2 }));
+});
+
+test('stitchSegmentsIntoPolylines detects a closed ring (a small square)', () => {
+  const segments = [
+    [{ x: 0, y: 0 }, { x: 1, y: 0 }],
+    [{ x: 1, y: 0 }, { x: 1, y: 1 }],
+    [{ x: 1, y: 1 }, { x: 0, y: 1 }],
+    [{ x: 0, y: 1 }, { x: 0, y: 0 }],
+  ];
+  const chains = stitchSegmentsIntoPolylines(segments);
+  assert.equal(chains.length, 1);
+  assert.equal(chains[0].closed, true);
+  assert.deepEqual(chains[0].points[0], chains[0].points[chains[0].points.length - 1]);
+});
+
+test('stitchSegmentsIntoPolylines leaves an unjoinable segment as its own open 2-point chain', () => {
+  const segments = [[{ x: 5, y: 5 }, { x: 6, y: 6 }]];
+  const chains = stitchSegmentsIntoPolylines(segments);
+  assert.equal(chains.length, 1);
+  assert.equal(chains[0].closed, false);
+  assert.deepEqual(chains[0].points, segments[0]);
+});
+
+test('smoothPolyline with 0 iterations (or too few points) returns the input unchanged', () => {
+  const pts = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 1 }];
+  assert.equal(smoothPolyline(pts, 0, false), pts);
+  assert.equal(smoothPolyline([{ x: 0, y: 0 }, { x: 1, y: 1 }], 3, false).length, 2);
+});
+
+test('smoothPolyline keeps an open polyline\'s two endpoints fixed', () => {
+  const pts = [{ x: 0, y: 0 }, { x: 1, y: 2 }, { x: 2, y: 0 }];
+  const smoothed = smoothPolyline(pts, 2, false);
+  assert.deepEqual(smoothed[0], pts[0]);
+  assert.deepEqual(smoothed[smoothed.length - 1], pts[pts.length - 1]);
+  assert.ok(smoothed.length > pts.length);
+});
+
+test('smoothPolyline rounds a closed ring\'s corners without an explicit fixed endpoint', () => {
+  const pts = [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }];
+  const smoothed = smoothPolyline(pts, 1, true);
+  assert.equal(smoothed.length, pts.length * 2);
+  // No vertex of the smoothed ring should still sit exactly on a sharp
+  // original corner — that's the point of corner-cutting.
+  for (const s of smoothed) {
+    for (const p of pts) {
+      assert.ok(!(s.x === p.x && s.y === p.y));
+    }
+  }
 });

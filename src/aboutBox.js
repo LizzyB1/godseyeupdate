@@ -68,7 +68,9 @@ export class AboutBox {
 
     body.appendChild(section('MAP OVERLAYS', [
       'Height relief exaggeration makes hills/valleys more obvious — 1.0× is true scale.',
-      'Contour flags need "Show contour lines" on to have anything to flag; each one sits right on its line and nudges clear of any control panel in the way.',
+      'Line smoothing rounds off the raw computed contour line in steps — 0 is the exact line, higher numbers trade a little precision for a visibly smoother curve.',
+      'Contour flags need "Show contour lines" on to have anything to flag; each level gets one flag per edge toggled on (W/E/N/S), nudged clear of any control panel in the way.',
+      'A fully closed contour ring — an isolated hilltop or basin entirely inside the current view — gets its own small value label right on the ring, so a stack of rings up a hillside reads at a glance.',
       'Grid value labels show large lat/long labels on whichever grid lines are currently on screen.',
     ]));
 
@@ -82,7 +84,7 @@ export class AboutBox {
     ]));
 
     body.appendChild(section('CONTOUR LINE COLORS', [
-      'Land elevation and ocean depth contours each cycle through their own fixed color palette, so neighboring lines are easy to tell apart. A flag\'s pole always matches its own line\'s color; the flag\'s background/text-size are set separately with each box\'s own label controls.',
+      'Land elevation and ocean depth contours each cycle through their own fixed color palette, so neighboring lines are easy to tell apart. A flag\'s marker always matches its own line\'s color; flags are always transparent with heavy-shadow white text — only text size is set separately, with each box\'s own label controls.',
     ]));
   }
 

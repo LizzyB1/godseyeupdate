@@ -1,10 +1,10 @@
 import * as Cesium from 'cesium';
-import { marchingSquaresSegments, gridToLonLat, westmostSegmentPoint } from './contourMath.js';
+import { marchingSquaresSegments, gridToLonLat, extremeSegmentPoint, stitchSegmentsIntoPolylines, smoothPolyline } from './contourMath.js';
 import { formatLatLonDMS, formatLatLonDecimal, googleMapsLink, formatHeight, toDMS } from './coordFormat.js';
 import { resolveApiKey } from '../apiKeys.js';
 import { sampleSceneHeights } from './sceneHeight.js';
 import { getSharedCache } from './apiCache.js';
-import { buildContourFlags, installFlagAvoidance, thinSpotsByStep, DEFAULT_FLAG_FONT_SIZE, DEFAULT_FLAG_BG_ALPHA } from './contourFlags.js';
+import { buildContourFlags, buildRingLabels, installFlagAvoidance, thinSpotsByStep, DEFAULT_FLAG_FONT_SIZE } from './contourFlags.js';
 import { LAND_CONTOUR_PALETTE, paletteColorHex } from './contourColors.js';
 
 /**
@@ -46,6 +46,8 @@ const CONTOUR_GRID_ROWS = 20;
 const MAX_CONTOUR_VIEW_SPAN_DEG = 1.5; // ~165km — above this, contours are too coarse to be meaningful
 const MAX_CONTOUR_LEVELS = 60; // hard cap so pathological relief can't spawn thousands of polylines
 const MAX_GRID_LINES_PER_AXIS = 60;
+/** Valid `flagEdges`/edge-argument values, in the fixed order UI checkboxes present them. */
+const FLAG_EDGES = ['west', 'east', 'north', 'south'];
 // If more than this fraction of the sampled grid comes back unresolved
 // (tiles for a freshly-panned-to area haven't streamed in yet), retry once
 // after a short delay instead of leaving contours sparse/missing.
@@ -69,6 +71,10 @@ export const DEFAULT_STATE = Object.freeze({
   contourMajorSpacing: 50,
   contourMinorEnabled: false,
   contourMinorSpacing: 10,
+  // Chaikin corner-cutting passes applied to every drawn contour line (see
+  // data/contourMath.js's smoothPolyline) — 0 is the raw marching-squares
+  // line, higher numbers round it off more. This is the "precision" slider.
+  contourSmoothing: 1,
   verticalExaggeration: 1,
   gridEnabled: false,
   gridSpacingDeg: 1,
@@ -84,16 +90,25 @@ export const DEFAULT_STATE = Object.freeze({
   // (grid) and from `contoursEnabled` (the lines themselves): the flags can
   // be shown/hidden independently of both. See `data/contourFlags.js`.
   contourFlagsEnabled: false,
-  // Flag label style — independent of the contour LINE colors (which cycle
-  // through data/contourColors.js's palette): the plaque background is a
-  // single user-picked color/opacity/text-size, same idea as the existing
-  // grid-color picker.
+  // Flag label text size — independent of the contour LINE colors (which
+  // cycle through data/contourColors.js's palette). The plaque background
+  // is gone (flags are transparent, drop-shadow text — see
+  // data/contourFlags.js) so there's no color/opacity to persist any more.
   flagFontSize: DEFAULT_FLAG_FONT_SIZE,
-  flagBgColor: '#c62828',
-  flagBgAlpha: DEFAULT_FLAG_BG_ALPHA,
+  // Which edge(s) of the current view each major level gets a flag placed
+  // toward — 'west' alone was the original (and still default-included)
+  // behavior; adding 'east' is what "doubles their occurrence" so a line
+  // spanning the whole screen reads a value near whichever side is
+  // actually in view. See data/contourMath.js's extremeSegmentPoint.
+  flagEdges: ['west', 'east'],
   // "Label every contour / every other / every 3rd…" — 1 = every major
   // contour line gets a flag (today's behavior), 2 = every other, etc.
   flagLabelStep: 1,
+  // Small "which ring is this" label on every fully-closed contour line
+  // (an isolated hilltop/basin) — see data/contourFlags.js's
+  // buildRingLabels. On by default since it's a direct legibility win with
+  // no clutter cost when there's nothing closed in view.
+  ringLabelsEnabled: true,
 });
 
 /** Font for grid/contour line value labels — deliberately large, per the
@@ -138,7 +153,16 @@ export class MapOverlaysEngine {
     this._contourFlagDataSource = new Cesium.CustomDataSource('mapOverlaysContourFlags');
     this.viewer.dataSources.add(this._contourFlagDataSource);
     this._contourFlagEntities = [];
-    this._removeFlagAvoidance = installFlagAvoidance(this.viewer, () => this._contourFlagEntities);
+    // Small closed-ring labels — their own data source (toggles
+    // independently of the big edge flags above) but share the same
+    // panel-avoidance pass, see the combined getEntities() below.
+    this._contourRingLabelDataSource = new Cesium.CustomDataSource('mapOverlaysRingLabels');
+    this.viewer.dataSources.add(this._contourRingLabelDataSource);
+    this._ringLabelEntities = [];
+    this._removeFlagAvoidance = installFlagAvoidance(
+      this.viewer,
+      () => [...this._contourFlagEntities, ...this._ringLabelEntities],
+    );
 
     this._cursorActive = false;
     this._cursorEntity = null;
@@ -230,6 +254,19 @@ export class MapOverlaysEngine {
     if (this.state.contoursEnabled && this.state.contourMinorEnabled) this._scheduleRecompute();
   }
 
+  /**
+   * "Precision" slider: how many Chaikin corner-cutting passes
+   * (`data/contourMath.js`'s `smoothPolyline`) each contour line gets
+   * before it's drawn. 0 = raw marching-squares line; higher rounds it off
+   * more. Needs a full recompute (not just a redraw) since it changes the
+   * actual line geometry, not just a label's style.
+   */
+  setContourSmoothing(level) {
+    this.state.contourSmoothing = Cesium.Math.clamp(Math.round(Number(level)) || 0, 0, 4);
+    this._persist();
+    if (this.state.contoursEnabled) this._scheduleRecompute();
+  }
+
   // ── grid line value labels ──────────────────────────────────────────
   /**
    * Large-text lat/long value labels on whichever grid lines are currently
@@ -269,6 +306,13 @@ export class MapOverlaysEngine {
     this._lastLevelPaletteIndex = null;
   }
 
+  /** Ring labels toggle independently of the big edge flags above (`ringLabelsEnabled` vs. `contourFlagsEnabled`), so this is deliberately separate from `_clearContourFlags` — `_clearContours()` (everything off) calls both. */
+  _clearRingLabels() {
+    this._contourRingLabelDataSource.entities.removeAll();
+    this._ringLabelEntities = [];
+    this._lastRingSpots = null;
+  }
+
   // ── contour flag label style ────────────────────────────────────────
   setFlagFontSize(px) {
     this.state.flagFontSize = Cesium.Math.clamp(Number(px) || DEFAULT_FLAG_FONT_SIZE, 12, 48);
@@ -276,16 +320,18 @@ export class MapOverlaysEngine {
     if (this.state.contourFlagsEnabled) this._rebuildContourFlagsOnly();
   }
 
-  setFlagBgColor(hex) {
-    this.state.flagBgColor = hex || DEFAULT_STATE.flagBgColor;
+  /**
+   * Which edge(s) of the current view get a flag for each (thinned) major
+   * level — any non-empty subset of `['west','east','north','south']`.
+   * Changes the actual spot geometry (computed per-edge in
+   * `_recomputeContours`), so — unlike the style-only setters above — this
+   * needs a full recompute, not just a redraw.
+   */
+  setFlagEdges(edges) {
+    const next = Array.isArray(edges) ? edges.filter((e) => FLAG_EDGES.includes(e)) : [];
+    this.state.flagEdges = next.length ? next : ['west'];
     this._persist();
-    if (this.state.contourFlagsEnabled) this._rebuildContourFlagsOnly();
-  }
-
-  setFlagBgAlpha(alpha) {
-    this.state.flagBgAlpha = Cesium.Math.clamp(Number(alpha), 0, 1);
-    this._persist();
-    if (this.state.contourFlagsEnabled) this._rebuildContourFlagsOnly();
+    if (this.state.contourFlagsEnabled && this.state.contoursEnabled) this._scheduleRecompute();
   }
 
   setFlagLabelStep(step) {
@@ -294,13 +340,41 @@ export class MapOverlaysEngine {
     if (this.state.contourFlagsEnabled) this._rebuildContourFlagsOnly();
   }
 
-  /** Re-draws just the flag layer from the last-computed contour spots, without a full re-sample of scene heights — used when only a label-style control (font/bg/step) changes. */
+  /** Re-draws just the flag layer from the last-computed contour spots, without a full re-sample of scene heights — used when only a label-style control (font/step) changes. */
   _rebuildContourFlagsOnly() {
     if (!this._lastFlagSpotByLevel) return;
     this._applyContourFlags(this._lastFlagSpotByLevel);
   }
 
-  /** Builds (or clears) the flag layer from a full `Map<level, spot>` — applies the frequency thinning and current label style. `levelPaletteIndex` maps each level to the palette index its contour LINE was drawn with, so a flag's pole always matches its line even after thinning changes iteration order. */
+  // ── closed-ring labels ──────────────────────────────────────────────
+  /** Small "which ring is this" label on every fully-closed contour line — see data/contourFlags.js's buildRingLabels. Purely a display toggle over already-computed ring spots, so (unlike setFlagEdges) this never needs a recompute, only a redraw. */
+  setRingLabelsEnabled(enabled) {
+    this.state.ringLabelsEnabled = Boolean(enabled);
+    this._persist();
+    this._rebuildRingLabelsOnly();
+  }
+
+  /** Re-draws just the ring-label layer from the last-computed ring spots, without a full re-sample of scene heights. */
+  _rebuildRingLabelsOnly() {
+    this._applyRingLabels(this._lastRingSpots || []);
+  }
+
+  /** Builds (or clears) the ring-label layer from a full ring-spot list. */
+  _applyRingLabels(rings) {
+    this._lastRingSpots = rings;
+    if (!this.state.ringLabelsEnabled || !rings.length) {
+      this._contourRingLabelDataSource.entities.removeAll();
+      this._ringLabelEntities = [];
+      return;
+    }
+    this._ringLabelEntities = buildRingLabels({
+      dataSource: this._contourRingLabelDataSource,
+      rings,
+      formatValue: formatHeight,
+    });
+  }
+
+  /** Builds (or clears) the flag layer from a full `Map<level, Array<spot>>` — applies the frequency thinning and current label style. `levelPaletteIndex` maps each level to the palette index its contour LINE was drawn with, so a flag's pole always matches its line even after thinning changes iteration order. */
   _applyContourFlags(flagSpotByLevel, levelPaletteIndex = this._lastLevelPaletteIndex) {
     this._lastFlagSpotByLevel = flagSpotByLevel;
     this._lastLevelPaletteIndex = levelPaletteIndex;
@@ -312,8 +386,6 @@ export class MapOverlaysEngine {
       spots: thinned,
       formatValue: formatHeight,
       poleColorForLevel: (level) => Cesium.Color.fromCssColorString(paletteColorHex(LAND_CONTOUR_PALETTE, levelPaletteIndex?.get(level) ?? 0)),
-      bgColor: Cesium.Color.fromCssColorString(this.state.flagBgColor),
-      bgAlpha: this.state.flagBgAlpha,
       fontSize: this.state.flagFontSize,
     });
   }
@@ -331,6 +403,7 @@ export class MapOverlaysEngine {
       this._contourPrimitive = null;
     }
     this._clearContourFlags();
+    this._clearRingLabels();
     this._setStatus('');
   }
 
@@ -419,36 +492,74 @@ export class MapOverlaysEngine {
     const levelPaletteIndex = new Map(sortedLevels.map((lvl, i) => [lvl.height, i]));
     const colorForLevel = (height) => Cesium.Color.fromCssColorString(paletteColorHex(LAND_CONTOUR_PALETTE, levelPaletteIndex.get(height) ?? 0));
 
-    // For each major level, remember whichever segment endpoint sits
-    // closest to the view's west edge — that's where its flag goes (see
-    // data/contourFlags.js), one per level rather than one per segment so a
-    // level with many crossings doesn't spam the screen with repeated
-    // flags. Biased west rather than view-center so a returning viewer
-    // always finds a level's flag in the same relative spot.
+    // For each major level, remember one segment endpoint per requested
+    // edge (see data/contourFlags.js) — one entry per edge rather than one
+    // per segment so a level with many crossings doesn't spam the screen
+    // with repeated flags. Biased toward fixed view edges rather than the
+    // view center so a returning viewer always finds a level's flag in the
+    // same relative spot(s).
     const flagSpotByLevel = new Map();
+    // One entry per fully-closed contour ring (an isolated hilltop/basin
+    // wholly inside the sampled view) at a MAJOR level — see
+    // data/contourFlags.js's buildRingLabels. Multiple concentric rings at
+    // the same height (e.g. two separate hills) each get their own entry.
+    const rings = [];
+    const smoothing = this.state.contourSmoothing;
 
     const newPrimitive = new Cesium.PolylineCollection();
     let segmentCount = 0;
     for (const { height, major: isMajor } of sortedLevels) {
       const segs = marchingSquaresSegments(heights, rows, cols, height);
+      segmentCount += segs.length;
       const lineColor = colorForLevel(height).withAlpha(isMajor ? 0.85 : 0.35);
-      for (const [a, b] of segs) {
-        const aLL = gridToLonLat(a.x, a.y, rows, cols, west, south, east, north);
-        const bLL = gridToLonLat(b.x, b.y, rows, cols, west, south, east, north);
+
+      // Stitch raw 2-point marching-squares segments into continuous
+      // chains so (a) a level draws as a handful of real polylines instead
+      // of a scatter of disconnected 2-point pieces, (b) smoothing has an
+      // actual line to round off rather than isolated segments, and (c) a
+      // chain whose ends meet is detectably a closed ring.
+      for (const chain of stitchSegmentsIntoPolylines(segs)) {
+        let drawPts;
+        if (chain.closed) {
+          // The stitched ring repeats its first point as its last; drop
+          // that duplicate before smoothing (smoothPolyline's own
+          // `closed` handling wraps the array itself), then close the
+          // SMOOTHED ring back up for rendering.
+          const openPts = chain.points.slice(0, -1);
+          const smoothed = smoothPolyline(openPts, smoothing, true);
+          drawPts = smoothed.length ? [...smoothed, smoothed[0]] : smoothed;
+        } else {
+          drawPts = smoothPolyline(chain.points, smoothing, false);
+        }
+        if (drawPts.length < 2) continue;
+        const positions = drawPts.map((pt) => {
+          const ll = gridToLonLat(pt.x, pt.y, rows, cols, west, south, east, north);
+          return Cesium.Cartesian3.fromDegrees(ll.lon, ll.lat, height);
+        });
         newPrimitive.add({
-          positions: [
-            Cesium.Cartesian3.fromDegrees(aLL.lon, aLL.lat, height),
-            Cesium.Cartesian3.fromDegrees(bLL.lon, bLL.lat, height),
-          ],
+          positions,
           width: isMajor ? 2 : 1,
           material: Cesium.Material.fromType('Color', { color: lineColor }),
         });
-        segmentCount += 1;
+
+        if (isMajor && chain.closed && this.state.ringLabelsEnabled) {
+          // Northmost point of the RAW (unsmoothed) ring — cheap, stable,
+          // and doesn't need smoothing since it's just a label anchor, not
+          // a rendered line.
+          let top = chain.points[0];
+          for (const p of chain.points) if (p.y < top.y) top = p;
+          const topLL = gridToLonLat(top.x, top.y, rows, cols, west, south, east, north);
+          rings.push({ level: height, lon: topLL.lon, lat: topLL.lat });
+        }
       }
 
       if (isMajor) {
-        const spot = westmostSegmentPoint(segs, rows, cols, west, south, east, north);
-        if (spot) flagSpotByLevel.set(height, spot);
+        const spots = [];
+        for (const edge of this.state.flagEdges) {
+          const spot = extremeSegmentPoint(segs, rows, cols, west, south, east, north, edge);
+          if (spot) spots.push(spot);
+        }
+        if (spots.length) flagSpotByLevel.set(height, spots);
       }
     }
 
@@ -463,6 +574,7 @@ export class MapOverlaysEngine {
     }
 
     this._applyContourFlags(flagSpotByLevel, levelPaletteIndex);
+    this._applyRingLabels(rings);
   }
 
   // ── lat/lon grid ─────────────────────────────────────────────────────
@@ -779,6 +891,7 @@ export class MapOverlaysEngine {
     this._removeFlagAvoidance?.();
     this._clearContours();
     this.viewer.dataSources.remove(this._contourFlagDataSource, true);
+    this.viewer.dataSources.remove(this._contourRingLabelDataSource, true);
     this._clearGrid();
     this._uninstallCursorHandler();
     this.clearCursor();

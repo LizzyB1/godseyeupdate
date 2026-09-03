@@ -94,26 +94,144 @@ export function gridToLonLat(x, y, rows, cols, west, south, east, north) {
 /**
  * Given one contour level's segments (as returned by
  * `marchingSquaresSegments`, already converted through `gridToLonLat`'s
- * coordinate space), find the segment endpoint closest to the sampled
- * rectangle's west edge — i.e. whichever endpoint has the smallest
- * longitude. Used to place a single per-level label/flag biased toward the
- * left/west side of the current view instead of at the view's geographic
- * center, so a returning viewer always finds a level's flag in the same
- * relative spot (the west edge) rather than wherever the view happened to
- * be centered.
+ * coordinate space), find the segment endpoint most extreme in the given
+ * geographic direction — smallest longitude for 'west', largest for 'east',
+ * largest latitude for 'north', smallest for 'south'. Used to place a
+ * per-level label/flag biased toward a chosen edge of the current view
+ * instead of at the view's geographic center, so a returning viewer always
+ * finds a level's flag in the same relative spot rather than wherever the
+ * view happened to be centered — see `data/contourFlags.js`'s edge-based
+ * flag placement, which calls this once per selected edge.
  *
  * @param {Array<[{x:number,y:number}, {x:number,y:number}]>} segments - one level's segments, fractional grid coords.
  * @param {number} rows @param {number} cols
  * @param {number} west @param {number} south @param {number} east @param {number} north
+ * @param {'west'|'east'|'north'|'south'} direction
  * @returns {?{lon:number, lat:number}} null if `segments` is empty.
  */
-export function westmostSegmentPoint(segments, rows, cols, west, south, east, north) {
+export function extremeSegmentPoint(segments, rows, cols, west, south, east, north, direction) {
   let best = null;
   for (const [a, b] of segments) {
     for (const pt of [a, b]) {
       const { lon, lat } = gridToLonLat(pt.x, pt.y, rows, cols, west, south, east, north);
-      if (!best || lon < best.lon) best = { lon, lat };
+      if (!best) { best = { lon, lat }; continue; }
+      if (direction === 'east' ? lon > best.lon
+        : direction === 'north' ? lat > best.lat
+        : direction === 'south' ? lat < best.lat
+        : lon < best.lon) { // 'west' (and the default) — smallest longitude
+        best = { lon, lat };
+      }
     }
   }
   return best;
+}
+
+/**
+ * `extremeSegmentPoint(..., 'west')` — kept as its own name since it's the
+ * long-standing default flag placement and the most-called of the four
+ * directions; every other direction goes through `extremeSegmentPoint`
+ * directly.
+ * @param {Array<[{x:number,y:number}, {x:number,y:number}]>} segments
+ * @param {number} rows @param {number} cols
+ * @param {number} west @param {number} south @param {number} east @param {number} north
+ * @returns {?{lon:number, lat:number}}
+ */
+export function westmostSegmentPoint(segments, rows, cols, west, south, east, north) {
+  return extremeSegmentPoint(segments, rows, cols, west, south, east, north, 'west');
+}
+
+/**
+ * Joins the 2-point segments `marchingSquaresSegments` returns for one
+ * level into continuous polylines, by repeatedly merging any two chains
+ * that share an endpoint (segments arrive in raster cell-scan order, so a
+ * ring's pieces are scattered through the array, not adjacent). A chain
+ * whose two ends meet back up is a closed ring — an isolated hilltop or
+ * basin fully inside the sampled view — flagged `closed: true` so callers
+ * can both smooth it as a loop (`smoothPolyline`) and label it as one (see
+ * `data/mapOverlays.js`'s ring-label pass). A segment that never joins
+ * anything else stays a 2-point chain of its own (open, `closed: false`) —
+ * the common case at the sampled rectangle's edge, where a level's line
+ * runs off the visible area rather than closing.
+ *
+ * @param {Array<[{x:number,y:number}, {x:number,y:number}]>} segments - one level's segments, fractional grid coords.
+ * @param {number} [eps] - endpoint match tolerance, in fractional grid units. The default is generous relative to typical float roundoff between two cells computing the same shared edge crossing from opposite sides.
+ * @returns {Array<{points: Array<{x:number,y:number}>, closed: boolean}>}
+ */
+export function stitchSegmentsIntoPolylines(segments, eps = 1e-6) {
+  const key = (p) => `${Math.round(p.x / eps)},${Math.round(p.y / eps)}`;
+  const chains = segments.map(([a, b]) => ({ points: [a, b], closed: false }));
+
+  let merged = true;
+  while (merged) {
+    merged = false;
+    for (let i = 0; i < chains.length && !merged; i += 1) {
+      const A = chains[i];
+      if (A.closed) continue;
+      const aStart = A.points[0];
+      const aEnd = A.points[A.points.length - 1];
+      for (let j = 0; j < chains.length; j += 1) {
+        if (i === j) continue;
+        const B = chains[j];
+        if (B.closed) continue;
+        const bStart = B.points[0];
+        const bEnd = B.points[B.points.length - 1];
+        if (key(aEnd) === key(bStart)) {
+          A.points = A.points.concat(B.points.slice(1));
+        } else if (key(aEnd) === key(bEnd)) {
+          A.points = A.points.concat([...B.points].reverse().slice(1));
+        } else if (key(aStart) === key(bEnd)) {
+          A.points = B.points.concat(A.points.slice(1));
+        } else if (key(aStart) === key(bStart)) {
+          A.points = [...B.points].reverse().concat(A.points.slice(1));
+        } else {
+          continue;
+        }
+        chains.splice(j, 1);
+        merged = true;
+        break;
+      }
+    }
+  }
+
+  for (const chain of chains) {
+    if (chain.points.length > 2 && key(chain.points[0]) === key(chain.points[chain.points.length - 1])) {
+      chain.closed = true;
+    }
+  }
+  return chains;
+}
+
+/**
+ * Chaikin corner-cutting smoothing: each pass replaces every vertex pair
+ * with two new points 1/4 and 3/4 of the way along their segment, rounding
+ * the polyline's corners without moving it far from the original data (the
+ * standard cheap "smoother lines" approach — no spline solve, just repeated
+ * corner-cutting, which is why more `iterations` reads as more precision/
+ * refinement rather than a heavier distortion). An open polyline keeps its
+ * two endpoints fixed across every pass; a closed one cuts every corner,
+ * itself included, and stays closed.
+ * @param {Array<{x:number,y:number}>} points
+ * @param {number} iterations - 0 returns `points` unchanged.
+ * @param {boolean} closed
+ * @returns {Array<{x:number,y:number}>}
+ */
+export function smoothPolyline(points, iterations, closed) {
+  const n = Math.max(0, Math.round(iterations) || 0);
+  if (n === 0 || points.length < 3) return points;
+  let pts = points;
+  for (let iter = 0; iter < n; iter += 1) {
+    const next = [];
+    const count = pts.length;
+    const limit = closed ? count : count - 1;
+    if (!closed) next.push(pts[0]);
+    for (let i = 0; i < limit; i += 1) {
+      const p0 = pts[i];
+      const p1 = pts[(i + 1) % count];
+      next.push({ x: p0.x + 0.25 * (p1.x - p0.x), y: p0.y + 0.25 * (p1.y - p0.y) });
+      next.push({ x: p0.x + 0.75 * (p1.x - p0.x), y: p0.y + 0.75 * (p1.y - p0.y) });
+    }
+    if (!closed) next.push(pts[count - 1]);
+    pts = next;
+  }
+  return pts;
 }

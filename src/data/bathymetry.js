@@ -485,7 +485,12 @@ export class BathymetryEngine {
         segmentCount += 1;
       }
       const spot = westmostSegmentPoint(segments, rows, cols, west, south, east, north);
-      if (spot) flagSpotByLevel.set(level, spot);
+      // buildContourFlags (data/contourFlags.js) now takes an array of
+      // spots per level (it can place more than one, e.g. one per edge —
+      // see data/mapOverlays.js's flagEdges); this engine still only ever
+      // computes the one westmost spot, so it's just wrapped as a 1-item
+      // array to match.
+      if (spot) flagSpotByLevel.set(level, [spot]);
     }
 
     this._contourResultText = segmentCount > 0

@@ -1,12 +1,13 @@
 import { buildMiniBox } from './miniBox.js';
 
 /**
- * @file "Map Overlays" mini control box: elevation contours, vertical
- * (height-relief) exaggeration, a lat/lon graticule, and a combined toggle
- * for large on-screen value labels on both — everything driven by
- * `src/data/mapOverlays.js`'s `MapOverlaysEngine`. Also carries the
- * "share viewport" screenshot button in its header, since it doesn't
- * warrant a whole panel of its own.
+ * @file "Map Overlays" mini control box: elevation contours (with a line-
+ * smoothing precision slider and closed-ring labeling), vertical
+ * (height-relief) exaggeration, a lat/lon graticule, a combined toggle for
+ * large on-screen value labels on both, and edge-placement elevation
+ * flags — everything driven by `src/data/mapOverlays.js`'s
+ * `MapOverlaysEngine`. Also carries the "share viewport" screenshot button
+ * in its header, since it doesn't warrant a whole panel of its own.
  *
  * The coordinate cursor/pin tool used to live in this same box; it's now
  * its own standalone, independently movable/resizable/hidable box — see
@@ -111,6 +112,28 @@ export class MapOverlayControls {
     minorRow.appendChild(document.createTextNode('+ minor contours every 10 m'));
     contourSection.appendChild(minorRow);
 
+    const precisionRow = el('label', 'mapovl-row');
+    precisionRow.appendChild(document.createTextNode('Line smoothing'));
+    const precisionInput = document.createElement('input');
+    precisionInput.type = 'range';
+    precisionInput.min = '0';
+    precisionInput.max = '4';
+    precisionInput.step = '1';
+    precisionInput.value = String(this.engine.state.contourSmoothing);
+    precisionInput.title = '0 = raw line, higher = smoother/more precise';
+    precisionRow.appendChild(precisionInput);
+    contourSection.appendChild(precisionRow);
+    precisionInput.addEventListener('change', () => this.engine.setContourSmoothing(Number(precisionInput.value)));
+
+    const ringLabelsRow = el('label', 'mapovl-row');
+    const ringLabelsEnable = document.createElement('input');
+    ringLabelsEnable.type = 'checkbox';
+    ringLabelsEnable.checked = this.engine.state.ringLabelsEnabled;
+    ringLabelsRow.appendChild(ringLabelsEnable);
+    ringLabelsRow.appendChild(document.createTextNode('Label closed contour rings'));
+    contourSection.appendChild(ringLabelsRow);
+    ringLabelsEnable.addEventListener('change', () => this.engine.setRingLabelsEnabled(ringLabelsEnable.checked));
+
     const contourStatus = el('div', 'mapovl-status', '');
     contourSection.appendChild(contourStatus);
     this._contourStatus = contourStatus;
@@ -205,8 +228,9 @@ export class MapOverlayControls {
 
     // ── Contour elevation flags ─────────────────────────────────────────
     // Independent of both "Show contour lines" and the grid labels above —
-    // a big pole+plaque flag on every major contour line currently on
-    // screen, biased toward the view's west edge (see data/contourFlags.js).
+    // a marker+numbered label on every major contour line currently on
+    // screen, placed toward whichever view edge(s) are toggled on below
+    // (see data/contourFlags.js).
     const flagSection = el('div', 'mapovl-section');
     flagSection.appendChild(el('div', 'mapovl-section-title', 'CONTOUR FLAGS'));
     const flagRow = el('label', 'mapovl-row');
@@ -249,27 +273,41 @@ export class MapOverlayControls {
     flagSection.appendChild(flagSizeRow);
     flagSizeInput.addEventListener('input', () => this.engine.setFlagFontSize(Number(flagSizeInput.value)));
 
-    const flagBgColorRow = el('label', 'mapovl-row');
-    flagBgColorRow.appendChild(document.createTextNode('Background color'));
-    const flagBgColorInput = document.createElement('input');
-    flagBgColorInput.type = 'color';
-    flagBgColorInput.className = 'mapovl-color';
-    flagBgColorInput.value = this.engine.state.flagBgColor;
-    flagBgColorRow.appendChild(flagBgColorInput);
-    flagSection.appendChild(flagBgColorRow);
-    flagBgColorInput.addEventListener('input', () => this.engine.setFlagBgColor(flagBgColorInput.value));
-
-    const flagBgAlphaRow = el('label', 'mapovl-row');
-    flagBgAlphaRow.appendChild(document.createTextNode('Background transparency'));
-    const flagBgAlphaInput = document.createElement('input');
-    flagBgAlphaInput.type = 'range';
-    flagBgAlphaInput.min = '0';
-    flagBgAlphaInput.max = '1';
-    flagBgAlphaInput.step = '0.05';
-    flagBgAlphaInput.value = String(this.engine.state.flagBgAlpha);
-    flagBgAlphaRow.appendChild(flagBgAlphaInput);
-    flagSection.appendChild(flagBgAlphaRow);
-    flagBgAlphaInput.addEventListener('input', () => this.engine.setFlagBgAlpha(Number(flagBgAlphaInput.value)));
+    // Flag background is always transparent now (heavy black-shadow white
+    // text instead of a color-picked plaque — see data/contourFlags.js), so
+    // there's no color/alpha control any more. In its place: which edge(s)
+    // of the view each level gets a flag placed toward — multi-select
+    // toggle buttons, same pattern as the exaggeration buttons above.
+    const flagEdgeRow = el('div', 'mapovl-row');
+    flagEdgeRow.appendChild(document.createTextNode('Edges'));
+    const flagEdgeButtons = [];
+    const markActiveEdges = (edges) => {
+      for (const btn of flagEdgeButtons) btn.classList.toggle('is-active', edges.includes(btn.dataset.value));
+    };
+    for (const { label, value } of [
+      { label: 'W', value: 'west' },
+      { label: 'E', value: 'east' },
+      { label: 'N', value: 'north' },
+      { label: 'S', value: 'south' },
+    ]) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mapovl-btn';
+      btn.dataset.value = value;
+      btn.textContent = label;
+      btn.title = `Flag toward the view's ${value} edge`;
+      btn.setAttribute('aria-label', `Toggle flags on the ${value} edge`);
+      btn.addEventListener('click', () => {
+        const current = this.engine.state.flagEdges;
+        const next = current.includes(value) ? current.filter((e) => e !== value) : [...current, value];
+        this.engine.setFlagEdges(next);
+        markActiveEdges(this.engine.state.flagEdges);
+      });
+      flagEdgeButtons.push(btn);
+      flagEdgeRow.appendChild(btn);
+    }
+    markActiveEdges(this.engine.state.flagEdges);
+    flagSection.appendChild(flagEdgeRow);
 
     body.appendChild(flagSection);
 
@@ -285,6 +323,8 @@ export class MapOverlayControls {
       contourEnable.checked = false;
       intervalSelect.value = String(this.engine.state.contourMajorSpacing);
       minorEnable.checked = false;
+      precisionInput.value = String(this.engine.state.contourSmoothing);
+      ringLabelsEnable.checked = this.engine.state.ringLabelsEnabled;
       markActiveExaggeration(this.engine.state.verticalExaggeration);
       gridEnable.checked = false;
       gridSpacingSelect.value = String(this.engine.state.gridSpacingDeg);
@@ -293,8 +333,7 @@ export class MapOverlayControls {
       flagEnable.checked = false;
       flagStepSelect.value = String(this.engine.state.flagLabelStep);
       flagSizeInput.value = String(this.engine.state.flagFontSize);
-      flagBgColorInput.value = this.engine.state.flagBgColor;
-      flagBgAlphaInput.value = String(this.engine.state.flagBgAlpha);
+      markActiveEdges(this.engine.state.flagEdges);
       this._setContourStatus('');
     });
     body.appendChild(resetBtn);
