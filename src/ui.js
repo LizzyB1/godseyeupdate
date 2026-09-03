@@ -313,10 +313,6 @@ const RIGHT_STACK_OBSTACLE_SELECTOR = [
   '#cesium-credits .cesium-credit-textContainer',
   '#command-dock',
   '#gev-voice-control',
-  // Fixed-position bottom-right widget added alongside the GPS track loader
-  // — see src/gpsTrackPanel.js. Keeps an expanded global-context-panel from
-  // growing down underneath it.
-  '.gps-track-toggle',
 ].join(', ');
 /** Display labels shown in the mini-status readout for each active style. */
 const STYLE_STATUS_LABELS = {

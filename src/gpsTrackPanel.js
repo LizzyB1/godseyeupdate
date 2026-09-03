@@ -1,23 +1,34 @@
+import { buildMiniBox } from './miniBox.js';
+import { hidePanel, isPanelHidden } from './panelVisibility.js';
 import { parseTrackFile } from './data/gpsTrackParse.js';
 
 /**
- * @file "Module loader" panel for the GPS toolkit: lets an operator load raw
- * NMEA `.txt/.log/.nmea` logger dumps (as produced by the uploaded
+ * @file "GPS Tracks" mini control box: lets an operator load raw NMEA
+ * `.txt/.log/.nmea` logger dumps (as produced by the uploaded
  * nmea_to_gpx.py / convert_logs.py scripts) or already-converted `.gpx`
  * files straight into the browser — parsed client-side by
  * `data/gpsTrackParse.js` — and view the resulting track(s) as an extra
  * overlay on the live globe via `data/gpsTracks.js`. No Python, no server
  * round-trip.
  *
- * Self-contained by design (own floating panel, own toggle button), the
- * same pattern as `cameraControls.js`'s on-screen pad — it is not wired
- * into the app's DataLayerManager/share-link layer system, so it can't
- * destabilize that registry.
+ * Same movable/resizable/persisted-position/collapsible/hideable box
+ * mechanics as the app's other mini-boxes (`miniBox.js` +
+ * `panelVisibility.js`) — see `bathymetryBox.js` for the pattern this
+ * mirrors. Reuses the shared `.mapovl-*`-style dark-chip content look
+ * where it fits, but keeps its own `.gps-track-panel__*` content classes
+ * for the drop zone / row list, which are specific to this box.
  *
  * @module gpsTrackPanel
  */
 
 const ACCEPT = '.gpx,.txt,.log,.nmea';
+
+function el(tag, className, html) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (html != null) node.innerHTML = html;
+  return node;
+}
 
 function readFileAsText(file) {
   return new Promise((resolve, reject) => {
@@ -29,7 +40,7 @@ function readFileAsText(file) {
 }
 
 /**
- * Builds and wires the GPS track loader panel + its toggle tab.
+ * Builds and wires the GPS track loader mini-box.
  * @param {import('./data/gpsTracks.js').GpsTrackOverlay} overlay
  */
 export class GpsTrackPanel {
@@ -40,47 +51,63 @@ export class GpsTrackPanel {
   }
 
   _build() {
-    const toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.id = 'gps-track-toggle';
-    toggle.className = 'gps-track-toggle';
-    toggle.title = 'GPS tracks — load NMEA/GPX logs as an overlay';
-    toggle.setAttribute('aria-label', 'Toggle GPS track loader panel');
-    toggle.setAttribute('aria-pressed', 'false');
-    toggle.textContent = '⛳ Tracks';
-    document.body.appendChild(toggle);
-    this._toggle = toggle;
+    const box = buildMiniBox({
+      idPrefix: 'gpstrack',
+      storagePrefix: 'godsEyeView.gpsTrackBox.',
+      title: 'GPS TRACKS',
+      ariaLabel: 'GPS track loader: load NMEA/GPX logs as an overlay',
+      defaultWidth: 260,
+      defaultHeight: 320,
+      minWidth: 220,
+      maxWidth: 440,
+      minHeight: 200,
+      maxHeight: 560,
+      anchor: { right: '16px', top: '440px' },
+      onHeaderBuilt: (header) => {
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'gpstrack-close-btn';
+        closeBtn.title = 'Hide panel — restore it from the Hidden Panels tray';
+        closeBtn.setAttribute('aria-label', 'Hide GPS Tracks panel');
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          hidePanel('gpstrack-pad');
+        });
+        header.appendChild(closeBtn);
+      },
+    });
+    this._box = box;
+    // The box is built well after ui.js's one-time `applyStoredHiddenState()`
+    // pass (it doesn't exist yet at that point), so a previously-hidden
+    // state has to be re-applied here instead of relying on that pass.
+    box.root.classList.toggle('panel-fully-hidden', isPanelHidden('gpstrack-pad'));
+    const body = box.body;
 
-    const panel = document.createElement('div');
-    panel.id = 'gps-track-panel';
-    panel.className = 'gps-track-panel';
-    panel.hidden = true;
-    panel.setAttribute('role', 'region');
-    panel.setAttribute('aria-label', 'GPS track loader');
-
-    panel.innerHTML = `
-      <div class="gps-track-panel__header">
-        <span>GPS TRACK LOADER</span>
-        <button type="button" class="gps-track-panel__close" aria-label="Close">×</button>
-      </div>
-      <div class="gps-track-panel__drop" tabindex="0" role="button"
-           aria-label="Load GPS log files: click to browse or drag files here">
+    const drop = el(
+      'div',
+      'gps-track-panel__drop',
+      `
         <div class="gps-track-panel__drop-label">Drop .gpx / .txt / .log / .nmea files here</div>
         <div class="gps-track-panel__drop-sub">or click to browse — raw NMEA logger dumps or converted GPX tracks</div>
         <input type="file" class="gps-track-panel__input" accept="${ACCEPT}" multiple hidden>
-      </div>
-      <div class="gps-track-panel__status" aria-live="polite"></div>
-      <div class="gps-track-panel__list"></div>
-    `;
-    document.body.appendChild(panel);
-    this._panel = panel;
-    this._status = panel.querySelector('.gps-track-panel__status');
-    this._list = panel.querySelector('.gps-track-panel__list');
-    this._input = panel.querySelector('.gps-track-panel__input');
-    const drop = panel.querySelector('.gps-track-panel__drop');
+      `,
+    );
+    drop.tabIndex = 0;
+    drop.setAttribute('role', 'button');
+    drop.setAttribute('aria-label', 'Load GPS log files: click to browse or drag files here');
+    body.appendChild(drop);
 
-    toggle.addEventListener('click', () => this.setOpen(panel.hidden));
-    panel.querySelector('.gps-track-panel__close').addEventListener('click', () => this.setOpen(false));
+    const status = el('div', 'gps-track-panel__status');
+    status.setAttribute('aria-live', 'polite');
+    body.appendChild(status);
+    this._status = status;
+
+    const list = el('div', 'gps-track-panel__list');
+    body.appendChild(list);
+    this._list = list;
+
+    this._input = drop.querySelector('.gps-track-panel__input');
 
     drop.addEventListener('click', () => this._input.click());
     drop.addEventListener('keydown', (e) => {
@@ -108,12 +135,6 @@ export class GpsTrackPanel {
       drop.classList.remove('is-dragover');
       this._handleFiles(e.dataTransfer?.files);
     });
-  }
-
-  setOpen(open) {
-    this._panel.hidden = !open;
-    this._toggle.classList.toggle('is-active', open);
-    this._toggle.setAttribute('aria-pressed', String(open));
   }
 
   _setStatus(text, isError = false) {
@@ -189,8 +210,7 @@ export class GpsTrackPanel {
   }
 
   destroy() {
-    this._toggle.remove();
-    this._panel.remove();
+    this._box.destroy();
   }
 }
 

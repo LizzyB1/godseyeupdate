@@ -30,6 +30,7 @@ export const PANEL_LABELS = {
   'control-panel': 'Visual Presets',
   'location-bar': 'Location',
   'bathy-pad': 'Bathymetry',
+  'gpstrack-pad': 'GPS Tracks',
 };
 
 function loadHidden() {
