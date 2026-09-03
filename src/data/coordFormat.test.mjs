@@ -37,7 +37,8 @@ test('googleMapsLink builds a q= link, empty string when not finite', () => {
   assert.equal(googleMapsLink(NaN, NaN), '');
 });
 
-test('formatHeight rounds meters and shows feet alongside', () => {
-  assert.equal(formatHeight(100), '100 m (328 ft)');
+test('formatHeight rounds meters, metric only', () => {
+  assert.equal(formatHeight(100), '100 m');
+  assert.equal(formatHeight(12345), '12,345 m');
   assert.equal(formatHeight(NaN), '—');
 });

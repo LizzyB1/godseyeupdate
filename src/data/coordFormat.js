@@ -58,9 +58,8 @@ export function googleMapsLink(lat, lon) {
   return `https://www.google.com/maps?q=${lat.toFixed(6)},${lon.toFixed(6)}`;
 }
 
-/** Meters → a short human height string, whole meters (feet shown alongside). */
+/** Meters → a short human height string, whole meters, metric only. */
 export function formatHeight(meters) {
   if (!Number.isFinite(meters)) return '—';
-  const feet = meters * 3.280839895;
-  return `${Math.round(meters)} m (${Math.round(feet)} ft)`;
+  return `${Math.round(meters).toLocaleString('en-US')} m`;
 }

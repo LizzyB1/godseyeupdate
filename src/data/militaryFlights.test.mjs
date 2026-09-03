@@ -209,7 +209,7 @@ test('military poll refreshes tracked callsign/altitude/kts and marks a missed p
   try {
     await militaryFlightsLayer.update(viewer);
     assert.equal(entity.gevLabelModel.title, 'RCH451');
-    assert.match(entity.gevLabelModel.details.join(' · '), /28000 ft/);
+    assert.match(entity.gevLabelModel.details.join(' · '), /8534 m/);
     assert.match(entity.gevLabelModel.details.join(' · '), /400 kt/);
 
     await militaryFlightsLayer.update(viewer);
@@ -318,7 +318,7 @@ test('real military track path creates no native label and publishes every cache
       title: 'RCH451',
       details: [
         'C17 · 05-8152',
-        'United States Air Force · 28000 ft · 450 kt',
+        'United States Air Force · 8534 m · 450 kt',
       ],
       accent: '#ffd166',
     });

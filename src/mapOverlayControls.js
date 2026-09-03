@@ -145,7 +145,6 @@ export class MapOverlayControls {
     }
     markActiveExaggeration(this.engine.state.verticalExaggeration);
     exagSection.appendChild(exagRow);
-    exagSection.appendChild(el('div', 'mapovl-hint', 'Makes hills/valleys more obvious — 1.0× is true scale.'));
     body.appendChild(exagSection);
 
     // ── Lat/lon grid ──────────────────────────────────────────────────
@@ -200,7 +199,6 @@ export class MapOverlayControls {
     labelRow.appendChild(labelEnable);
     labelRow.appendChild(document.createTextNode('Show grid value labels'));
     labelSection.appendChild(labelRow);
-    labelSection.appendChild(el('div', 'mapovl-hint', 'Large lat/long labels on grid lines.'));
     body.appendChild(labelSection);
 
     labelEnable.addEventListener('change', () => this.engine.setLineLabelsEnabled(labelEnable.checked));
@@ -218,7 +216,6 @@ export class MapOverlayControls {
     flagRow.appendChild(flagEnable);
     flagRow.appendChild(document.createTextNode('Show elevation flags'));
     flagSection.appendChild(flagRow);
-    flagSection.appendChild(el('div', 'mapovl-hint', 'Big numbered flags sitting right on major contour lines, one per level, toward the west edge of the view. Needs "Show contour lines" on to have anything to flag. Nudged clear of any control panel in the way, otherwise exactly where the line is.'));
 
     const flagStepRow = el('label', 'mapovl-row');
     flagStepRow.appendChild(document.createTextNode('Label frequency'));

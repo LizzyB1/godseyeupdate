@@ -95,9 +95,9 @@ export function isPanelHidden(id) {
   return hidden.has(id);
 }
 
-/** @returns {string[]} ids of every currently-hidden panel, insertion order. */
+/** @returns {string[]} ids of every currently-hidden panel, most-recently-hidden first — so a restore list built straight from this naturally puts the panel someone just closed at the top, not buried under everything they hid earlier. */
 export function getHiddenPanelIds() {
-  return [...hidden];
+  return [...hidden].reverse();
 }
 
 /** @param {string} id */

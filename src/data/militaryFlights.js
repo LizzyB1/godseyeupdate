@@ -661,13 +661,14 @@ function _toCleanText(value) {
 }
 
 /**
- * Format an altitude value in feet for display, with fallback text.
+ * Format an altitude value (barometric feet, the feed's native unit) as a
+ * metric display string, with fallback text.
  * @param {number|null|undefined} altitudeFt - Barometric altitude in feet
- * @returns {string} Formatted altitude string (e.g. "35000 ft" or "Alt unknown")
+ * @returns {string} Formatted altitude string (e.g. "10668 m" or "Alt unknown")
  */
 function _formatAltitude(altitudeFt) {
   if (!Number.isFinite(altitudeFt)) return 'Alt unknown';
-  return `${Math.round(altitudeFt)} ft`;
+  return `${Math.round(altitudeFt * 0.3048)} m`;
 }
 
 /**

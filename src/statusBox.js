@@ -127,10 +127,10 @@ export class StatusBox {
       title: 'STATUS',
       ariaLabel: 'Status: which layers and engines are currently loading, fetching, or in error',
       defaultWidth: 264,
-      defaultHeight: 340,
+      defaultHeight: 250,
       minWidth: 220,
       maxWidth: 440,
-      minHeight: 160,
+      minHeight: 140,
       maxHeight: 640,
       // Below About (top edge, left:292px/top:16px, ~300px tall) — the
       // next open stretch of the same left-of-center column.

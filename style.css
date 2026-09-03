@@ -4320,7 +4320,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--panel-radius);
-  padding: 7px 9px 7px;
+  padding: 5px 6px 5px;
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.5),
     0 0 0 1px rgba(255, 255, 255, 0.03) inset,
@@ -4334,7 +4334,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 .data-toggle-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   flex: 1 1 auto;
   min-height: 0;
   max-height: 100%;
@@ -4361,8 +4361,8 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 }
 
 .data-toggle-row {
-  padding: 6px 8px 5px;
-  border-radius: 8px;
+  padding: 3px 5px 2px;
+  border-radius: 6px;
   transition: background var(--transition-fast);
 }
 
@@ -5689,40 +5689,46 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 5px;
 }
 
 .data-toggle-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
+  min-width: 0;
 }
 
 .data-icon {
-  font-size: 16px;
+  font-size: 12px;
   line-height: 1;
+  flex: 0 0 auto;
 }
 
 .data-name {
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--text-primary);
-  letter-spacing: 0.3px;
+  letter-spacing: 0.1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .data-toggle-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 5px;
+  flex: 0 0 auto;
 }
 
 .data-count {
   font-family: var(--font-mono);
-  font-size: 13px;
-  letter-spacing: 0.5px;
+  font-size: 10.5px;
+  letter-spacing: 0.3px;
   color: var(--text-secondary);
-  min-width: 34px;
+  min-width: 24px;
   text-align: right;
 }
 
@@ -5733,10 +5739,10 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   padding: 0;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1;
   color: #ffffff;
   background: rgba(255, 255, 255, 0.1);
@@ -5756,10 +5762,10 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 }
 
 .data-toggle-btn {
-  padding: 4px 10px;
+  padding: 2px 6px;
   font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 1.3px;
+  font-size: 8.5px;
+  letter-spacing: 0.9px;
   color: var(--text-dim);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -5767,7 +5773,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   cursor: pointer;
   transition: all var(--transition-fast);
   outline: none;
-  min-width: 42px;
+  min-width: 32px;
   text-align: center;
 }
 
@@ -5776,8 +5782,8 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 .data-toggle-btn.feed-stale,
 .data-toggle-btn.feed-fallback,
 .data-toggle-btn.feed-unavailable {
-  min-width: 92px;
-  letter-spacing: 0.7px;
+  min-width: 68px;
+  letter-spacing: 0.5px;
 }
 
 .data-toggle-btn:hover {
@@ -5816,11 +5822,11 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 
 .data-toggle-meta {
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.4px;
+  font-size: 9px;
+  letter-spacing: 0.3px;
   color: var(--text-dim);
-  padding-left: 26px;
-  margin-top: 2px;
+  padding-left: 17px;
+  margin-top: 1px;
 }
 
 /* Optional per-layer sub-controls: mode chips plus a color legend. Aligned
@@ -5830,9 +5836,9 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
-  padding-left: 26px;
-  margin-top: 5px;
+  gap: 3px 6px;
+  padding-left: 17px;
+  margin-top: 3px;
 }
 
 .data-toggle-controls[hidden] {
@@ -5840,10 +5846,10 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 }
 
 .data-toggle-chip {
-  padding: 2px 7px;
+  padding: 1px 5px;
   font-family: var(--font-mono);
-  font-size: 8px;
-  letter-spacing: 1.2px;
+  font-size: 7.5px;
+  letter-spacing: 1px;
   color: var(--text-dim);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -9716,8 +9722,8 @@ body.scene-playback-mode #first-run-launcher {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 7px;
+  gap: 3px;
+  padding: 5px;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -9753,36 +9759,43 @@ body.scene-playback-mode #first-run-launcher {
 }
 .statusbox-pad.is-collapsed .statusbox-body { display: none; }
 
-/* ── Status: content (row list, color-coded by feed state) ──────────── */
+/* ── Status: content (row list, color-coded by feed state) ────────────
+   Two-per-line grid, not a single stacked column — with 16 registered
+   layers in "ALL LAYERS" alone, one-per-line ran the box far taller than
+   any other mini-box. A lone item (an empty-state message, or an odd
+   count) just occupies the first cell; `.statusbox-empty` spans both so
+   it isn't stranded half-width. */
 .statusbox-list {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 4px;
 }
 .statusbox-empty {
-  font: 500 11.5px/1.3 var(--font-mono);
+  grid-column: 1 / -1;
+  font: 500 10px/1.25 var(--font-mono);
   color: var(--text-primary);
-  padding: 4px 6px;
-  border-radius: 6px;
+  padding: 3px 5px;
+  border-radius: 5px;
   background: rgba(0, 0, 0, 0.6);
 }
 .statusbox-row {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 5px;
-  font: 500 11.5px/1.35 var(--font-mono);
+  gap: 3px;
+  min-width: 0;
+  font: 500 10px/1.25 var(--font-mono);
   color: var(--text-primary);
-  padding: 4px 6px;
-  border-radius: 6px;
+  padding: 2px 4px;
+  border-radius: 5px;
   background: rgba(0, 0, 0, 0.6);
-  border-left: 3px solid var(--glass-border);
+  border-left: 2px solid var(--glass-border);
 }
 .statusbox-row-dot {
   flex: 0 0 auto;
   align-self: center;
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--text-dim);
 }
@@ -9795,13 +9808,13 @@ body.scene-playback-mode #first-run-launcher {
 .statusbox-row-state {
   flex: 0 0 auto;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   opacity: 0.85;
 }
 .statusbox-row-detail {
   flex: 1 1 100%;
   color: var(--text-dim);
-  font-size: 10.5px;
+  font-size: 9px;
 }
 /* nominal: default dim dot/border — the base rule above already covers it */
 .statusbox-row--loading {
@@ -9833,10 +9846,11 @@ body.scene-playback-mode #first-run-launcher {
   50% { opacity: 0.35; }
 }
 .statusbox-engine-row {
-  font: 500 11.5px/1.4 var(--font-mono);
+  min-width: 0;
+  font: 500 10px/1.3 var(--font-mono);
   color: var(--text-primary);
-  padding: 4px 6px;
-  border-radius: 6px;
+  padding: 3px 5px;
+  border-radius: 5px;
   background: rgba(0, 0, 0, 0.6);
   word-break: break-word;
 }

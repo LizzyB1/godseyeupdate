@@ -412,7 +412,7 @@ function _publishTrackedSelection(icao24, origin = 'programmatic') {
 function _contextSubjectMetadata(icao24) {
   const described = _describeFlight(icao24);
   if (!described) return null;
-  const altFt = Math.round((described.altitudeM || 0) * 3.28084);
+  const altM = Math.round(described.altitudeM || 0);
   const route = described.route && _routeIsPlausible(icao24, described.route)
     ? `${described.route.origin.code} → ${described.route.destination.code}`
     : null;
@@ -432,7 +432,7 @@ function _contextSubjectMetadata(icao24) {
       callsign: described.callsign || '',
       registration: described.registration || '',
       type: described.typeName || described.typeCode || '',
-      altitude: described.onGround ? 'on ground' : `${altFt.toLocaleString('en-US')} ft`,
+      altitude: described.onGround ? 'on ground' : `${altM.toLocaleString('en-US')} m`,
       speed: Number.isFinite(described.velocityMps)
         ? `${Math.round(described.velocityMps * 1.944)} kt`
         : '',
@@ -3282,8 +3282,10 @@ function _trackedLabelText(icao24) {
   // the ICAO hex, so a callsign-less enriched contact heads its readout with
   // the tail number rather than raw hex.
   const cs = _contactLabel(icao24, info);
+  // FL (flight level) is a numeric aviation designator, not a labeled unit —
+  // kept as-is above the transition altitude; below it, show plain meters.
   const altFt = Math.round((info.altitude || 0) * 3.28084);
-  const fl = altFt >= 18000 ? `FL${Math.round(altFt / 100)}` : `${altFt} ft`;
+  const fl = altFt >= 18000 ? `FL${Math.round(altFt / 100)}` : `${Math.round(info.altitude || 0)} m`;
   const spd = info.velocity ? `${Math.round(info.velocity * 1.944)} kts` : '';
   const stale = (_missingPolls.get(icao24) || _backoff) ? 'STALE' : '';
   const lines = [[cs, fl, spd, stale].filter(Boolean).join(' · ')];
