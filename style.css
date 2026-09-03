@@ -9113,16 +9113,6 @@ body.scene-playback-mode #first-run-launcher {
   color: var(--text-secondary);
 }
 
-.camctl-heading-chip {
-  flex: 0 0 auto;
-  font: 700 10px/1 var(--font-mono);
-  color: var(--accent);
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
-  padding: 2px 5px;
-}
-
 .camctl-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -9179,6 +9169,28 @@ body.scene-playback-mode #first-run-launcher {
 .camctl-orient-n {
   fill: var(--text-dim);
   font: 700 6px var(--font-mono);
+}
+
+/* E/S/W — secondary compass-rose ticks, lighter/smaller than N. The ring
+   never rotates (only the needle does), so all four stay level at all
+   times regardless of camera heading. */
+.camctl-orient-ew {
+  fill: var(--text-dim);
+  font: 600 5px var(--font-mono);
+  opacity: 0.6;
+}
+
+/* Standalone "viewpoint indicator" — the current heading, as a quick big-
+   number readout paired with the compass. Moved out of the header (see
+   buildControlBox) since a 5th item crammed in there with the grip/title/
+   hide/collapse controls read as cluttered. */
+.camctl-heading-chip {
+  font: 700 13px/1 var(--font-mono);
+  color: var(--accent);
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--glass-border);
+  border-radius: 4px;
+  padding: 3px 8px;
 }
 
 .camctl-orient-hub {

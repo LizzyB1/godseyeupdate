@@ -229,7 +229,6 @@ function fmtSignedDeg(deg) {
  * press-and-hold to the given callbacks.
  */
 function buildControlBox({ onPress, onRelease }) {
-  let headingChip;
   const miniBox = buildMiniBox({
     idPrefix: 'camctl',
     storagePrefix: STORAGE_PREFIX,
@@ -242,18 +241,20 @@ function buildControlBox({ onPress, onRelease }) {
     minHeight: MIN_HEIGHT,
     maxHeight: MAX_HEIGHT,
     anchor: { left: '24px', bottom: 'calc(2vh + 4.5rem)' },
-    onHeaderBuilt: (header) => {
-      headingChip = document.createElement('span');
-      headingChip.className = 'camctl-heading-chip';
-      headingChip.textContent = '000°';
-      header.appendChild(headingChip);
-    },
+    // No custom header content any more — the heading chip used to live
+    // here, but the header already carries the grip/title/hide/collapse
+    // controls, and a 5th item crammed in with them read as cluttered.
+    // It's its own standalone viewpoint indicator in the body instead —
+    // see the orient block below.
   });
   const body = miniBox.body;
 
-  // Orientation: compass ring (static, N-up) + rotating needle tipped with
-  // a camera-lens glyph, plus a text readout. Roll always reads ~0° now
-  // that the horizon is locked level (see module doc comment).
+  // Orientation: compass ring (static, N/E/S/W always level — the ring
+  // itself never rotates, only the needle inside it does) + rotating
+  // needle tipped with a camera-lens glyph, a standalone heading chip
+  // (the "viewpoint indicator" — separated out of the header, see above),
+  // and a text readout. Roll always reads ~0° now that the horizon is
+  // locked level (see module doc comment).
   const orient = document.createElement('div');
   orient.className = 'camctl-orient';
   orient.setAttribute('aria-hidden', 'true');
@@ -273,13 +274,24 @@ function buildControlBox({ onPress, onRelease }) {
   ring.setAttribute('r', '17.5');
   svg.appendChild(ring);
 
-  const nTick = document.createElementNS(svg.namespaceURI, 'text');
-  nTick.setAttribute('class', 'camctl-orient-n');
-  nTick.setAttribute('x', '20');
-  nTick.setAttribute('y', '7');
-  nTick.setAttribute('text-anchor', 'middle');
-  nTick.textContent = 'N';
-  svg.appendChild(nTick);
+  // Full compass rose — N emphasized (primary), E/S/W as lighter secondary
+  // ticks — all fixed in place around the ring; only the needle rotates.
+  const CARDINAL_TICKS = [
+    { label: 'N', x: 20, y: 7, primary: true },
+    { label: 'E', x: 33, y: 20, primary: false },
+    { label: 'S', x: 20, y: 33, primary: false },
+    { label: 'W', x: 7, y: 20, primary: false },
+  ];
+  for (const { label, x, y, primary } of CARDINAL_TICKS) {
+    const tick = document.createElementNS(svg.namespaceURI, 'text');
+    tick.setAttribute('class', primary ? 'camctl-orient-n' : 'camctl-orient-ew');
+    tick.setAttribute('x', String(x));
+    tick.setAttribute('y', String(y));
+    tick.setAttribute('text-anchor', 'middle');
+    if (!primary) tick.setAttribute('dominant-baseline', 'central');
+    tick.textContent = label;
+    svg.appendChild(tick);
+  }
 
   const needle = document.createElementNS(svg.namespaceURI, 'g');
   needle.setAttribute('class', 'camctl-orient-needle');
@@ -318,6 +330,16 @@ function buildControlBox({ onPress, onRelease }) {
 
   compass.appendChild(svg);
   orient.appendChild(compass);
+
+  // The standalone "viewpoint indicator" — a quick big-number readout of
+  // heading, separated from the header (see above) and paired visually
+  // with the compass it belongs to, above the finer-grained HDG/PIT/ROL
+  // readout row.
+  const headingChip = document.createElement('div');
+  headingChip.className = 'camctl-heading-chip';
+  headingChip.title = 'Camera heading — where the viewpoint is currently looking';
+  headingChip.textContent = '000°';
+  orient.appendChild(headingChip);
 
   const readout = document.createElement('div');
   readout.className = 'camctl-orient-readout';
