@@ -150,11 +150,16 @@ export const DEFAULT_STATE = Object.freeze({
   // data/contourFlags.js) so there's no color/opacity to persist any more.
   flagFontSize: DEFAULT_FLAG_FONT_SIZE,
   // Which edge(s) of the current view each major level gets a flag placed
-  // toward — 'west' alone was the original (and still default-included)
-  // behavior; adding 'east' is what "doubles their occurrence" so a line
-  // spanning the whole screen reads a value near whichever side is
-  // actually in view. See data/contourMath.js's extremeSegmentPoint.
-  flagEdges: ['west', 'east'],
+  // toward — 'west' alone was the original behavior; adding 'east' first
+  // "doubled their occurrence" so a line spanning the whole screen reads a
+  // value near whichever side is actually in view. Now defaults to all
+  // four edges for more on-screen labels overall — safe to turn up because
+  // `contourFlags.js`'s installFlagAvoidance now also nudges labels apart
+  // from EACH OTHER (not just away from control panels) and hides one
+  // outright if it truly can't find a clear spot, so more candidate flags
+  // converges on better screen coverage rather than more overlap. See
+  // data/contourMath.js's extremeSegmentPoint.
+  flagEdges: ['west', 'east', 'north', 'south'],
   // "Label every contour / every other / every 3rd…" — 1 = every major
   // contour line gets a flag (today's behavior), 2 = every other, etc.
   flagLabelStep: 1,

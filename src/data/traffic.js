@@ -13,6 +13,7 @@ import {
 import { queuePlatoons, locateAlongRoad } from './trafficQueue.js';
 import { registerDynamicCredit, TOMTOM_CREDIT } from './dataCredits.js';
 import { holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
+import { getSharedCache } from './apiCache.js';
 
 /**
  * @file Street Traffic — animated dots along OSM road polylines, colored by
@@ -422,6 +423,44 @@ export function getTrafficTimingDiagnostics() {
 const _tileCache = new Map();
 /** @const {number} Maximum tile cache entries before LRU eviction */
 const TILE_CACHE_MAX_ENTRIES = 64;
+
+/**
+ * Durable (IndexedDB, cross-session — see data/apiCache.js) cache for RAW
+ * Overpass responses, keyed by `"s,w,n,e|major"` or `"s,w,n,e|full"`. This
+ * is deliberately the raw fetched JSON, not `parseRoads()`'s output: that
+ * output bakes in a live `scene.sampleHeight()` ray-pick per road (see
+ * `parseRoads`'s `baseHeight`), which — like the contour engine's own
+ * scene-height sampling — must track whatever the scene is CURRENTLY
+ * rendering, not a snapshot from an earlier session. Caching the raw
+ * Overpass JSON durably still gets the actual win being asked for (fewer
+ * real network round-trips to Overpass across reloads/sessions for road
+ * geometry that barely ever changes) while `parseRoads()` still runs live
+ * on every cache hit, so heights are always sampled against the scene as
+ * it exists right now. `_tileCache` above remains the in-memory,
+ * already-parsed cache for repeat requests within one session; this is the
+ * layer underneath it for a FRESH session/reload.
+ */
+const ROAD_DATA_CACHE_STORE = 'trafficRoadData';
+/** Road network geometry changes rarely enough that a full day's staleness is an easy trade for cutting Overpass calls on repeat visits to the same area. */
+const ROAD_DATA_CACHE_FRESH_MS = 24 * 60 * 60 * 1000;
+const _durableRoadCache = getSharedCache();
+
+/**
+ * @param {string} durableKey
+ * @returns {Promise<Object|null>} the cached raw Overpass JSON, or null on a miss/stale/unavailable cache.
+ */
+async function readDurableRoadCache(durableKey) {
+  try {
+    const hit = await _durableRoadCache.get(ROAD_DATA_CACHE_STORE, durableKey);
+    if (hit && Date.now() - (hit.cachedAt || 0) < ROAD_DATA_CACHE_FRESH_MS) return hit.data;
+  } catch { /* durable cache unavailable — fall through to a live fetch */ }
+  return null;
+}
+
+/** Best-effort write-through; a failure here just means the next session re-fetches, never a user-visible error. @param {string} durableKey @param {Object} data */
+function writeDurableRoadCache(durableKey, data) {
+  _durableRoadCache.put(ROAD_DATA_CACHE_STORE, durableKey, { data, cachedAt: Date.now() }).catch(() => { /* best-effort */ });
+}
 
 /** Reusable scratch Cartesian3 to avoid per-frame allocation / GC pressure */
 const _scratchLerp = new Cesium.Cartesian3();
@@ -2092,14 +2131,24 @@ async function loadRoadsForBounds(bounds, altitude, trace = null) {
       )) return;
       renderedSomething = true;
     } else {
-      // Fetch major roads first (smaller payload, faster response)
-      _activeFetchAbort = new AbortController();
-      console.log(`[Data:Traffic] Fast fetch major roads [${cacheKey}]`);
-      const majorData = await fetchRoads(
-        clamped.south, clamped.west, clamped.north, clamped.east,
-        { majorOnly: true, timeoutSec: 12, signal: _activeFetchAbort.signal },
-        trace,
-      );
+      // Durable cache first (survives a reload/new session — see
+      // ROAD_DATA_CACHE_STORE's comment for why this is the raw Overpass
+      // JSON, not the parsed-with-baked-in-scene-heights result).
+      const majorDurableKey = `${cacheKey}|major`;
+      let majorData = await readDurableRoadCache(majorDurableKey);
+      if (majorData) {
+        console.log(`[Data:Traffic] Durable-cache hit major roads [${cacheKey}]`);
+      } else {
+        // Fetch major roads first (smaller payload, faster response)
+        _activeFetchAbort = new AbortController();
+        console.log(`[Data:Traffic] Fast fetch major roads [${cacheKey}]`);
+        majorData = await fetchRoads(
+          clamped.south, clamped.west, clamped.north, clamped.east,
+          { majorOnly: true, timeoutSec: 12, signal: _activeFetchAbort.signal },
+          trace,
+        );
+        if (generation === _loadGeneration) writeDurableRoadCache(majorDurableKey, majorData);
+      }
       // Discard stale response if a newer load was triggered while waiting
       if (generation !== _loadGeneration) return;
       cache.major = _parseRoads(majorData, trace);
@@ -2113,13 +2162,20 @@ async function loadRoadsForBounds(bounds, altitude, trace = null) {
     if (altitude > FAST_FETCH_ALTITUDE) return;
 
     // Detailed pass: fetch the full road graph (tertiary, residential, etc.)
-    _activeFetchAbort = new AbortController();
-    console.log(`[Data:Traffic] Full fetch local roads [${cacheKey}]`);
-    const fullData = await fetchRoads(
-      clamped.south, clamped.west, clamped.north, clamped.east,
-      { majorOnly: false, timeoutSec: 20, signal: _activeFetchAbort.signal },
-      trace,
-    );
+    const fullDurableKey = `${cacheKey}|full`;
+    let fullData = await readDurableRoadCache(fullDurableKey);
+    if (fullData) {
+      console.log(`[Data:Traffic] Durable-cache hit full roads [${cacheKey}]`);
+    } else {
+      _activeFetchAbort = new AbortController();
+      console.log(`[Data:Traffic] Full fetch local roads [${cacheKey}]`);
+      fullData = await fetchRoads(
+        clamped.south, clamped.west, clamped.north, clamped.east,
+        { majorOnly: false, timeoutSec: 20, signal: _activeFetchAbort.signal },
+        trace,
+      );
+      if (generation === _loadGeneration) writeDurableRoadCache(fullDurableKey, fullData);
+    }
     if (generation !== _loadGeneration) return;
 
     cache.full = _parseRoads(fullData, trace);

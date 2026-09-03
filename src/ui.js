@@ -3062,6 +3062,18 @@ export class StyleManager {
   }
 
   /**
+   * The sharpen post-process stage, for the Settings "Render quality"
+   * control (src/renderQuality.js) to enable/disable and retune alongside
+   * MSAA and tileset detail — this class owns the stage's lifecycle
+   * (`_initSharpen`), so a plain getter is the smallest way to let that
+   * setting reach it without hoisting the field to something more public.
+   * @returns {Cesium.PostProcessStage|null}
+   */
+  getSharpenStage() {
+    return this._sharpenStage;
+  }
+
+  /**
    * Wires up all primary UI event listeners: style buttons, keyboard shortcuts
    * (1-4 style keys, H/O/V/F/D/C hotkeys, Escape), AI prompt input with
    * debounce, HUD toggle, and clean-view toggle.

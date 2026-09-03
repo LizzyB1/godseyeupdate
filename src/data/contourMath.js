@@ -159,46 +159,85 @@ export function westmostSegmentPoint(segments, rows, cols, west, south, east, no
  */
 export function stitchSegmentsIntoPolylines(segments, eps = 1e-6) {
   const key = (p) => `${Math.round(p.x / eps)},${Math.round(p.y / eps)}`;
-  const chains = segments.map(([a, b]) => ({ points: [a, b], closed: false }));
 
-  let merged = true;
-  while (merged) {
-    merged = false;
-    for (let i = 0; i < chains.length && !merged; i += 1) {
-      const A = chains[i];
-      if (A.closed) continue;
-      const aStart = A.points[0];
-      const aEnd = A.points[A.points.length - 1];
-      for (let j = 0; j < chains.length; j += 1) {
-        if (i === j) continue;
-        const B = chains[j];
-        if (B.closed) continue;
-        const bStart = B.points[0];
-        const bEnd = B.points[B.points.length - 1];
-        if (key(aEnd) === key(bStart)) {
-          A.points = A.points.concat(B.points.slice(1));
-        } else if (key(aEnd) === key(bEnd)) {
-          A.points = A.points.concat([...B.points].reverse().slice(1));
-        } else if (key(aStart) === key(bEnd)) {
-          A.points = B.points.concat(A.points.slice(1));
-        } else if (key(aStart) === key(bStart)) {
-          A.points = [...B.points].reverse().concat(A.points.slice(1));
-        } else {
-          continue;
-        }
-        chains.splice(j, 1);
-        merged = true;
+  // Endpoint dictionary: key -> the one open chain currently dangling
+  // there, waiting for a partner. A standard marching-squares crossing
+  // point sits on exactly one shared cell edge, so it's ever the endpoint
+  // of exactly two segments/chains — meaning at most one chain is ever
+  // pending at a given key at once, and the next chain to reach that key
+  // is always its merge partner. That turns "find this chain's partner"
+  // into an O(1) map lookup instead of the previous full rescan of every
+  // other chain — and, since a merge used to also restart that rescan
+  // from i=0, the old approach was worst-case O(n^3) in segment count for
+  // a level with many short, disjoint chains (masked in practice by the
+  // sampling grid staying small — see CONTOUR_GRID_ROWS/COLS in
+  // data/mapOverlays.js — but a real risk if that grid or the level cap
+  // were ever raised). This is O(n) amortized instead.
+  const pending = new Map();
+
+  const setEnds = (chain) => {
+    pending.set(key(chain.points[0]), chain);
+    pending.set(key(chain.points[chain.points.length - 1]), chain);
+  };
+  const clearEnds = (chain) => {
+    const s = key(chain.points[0]);
+    const e = key(chain.points[chain.points.length - 1]);
+    if (pending.get(s) === chain) pending.delete(s);
+    if (pending.get(e) === chain) pending.delete(e);
+  };
+
+  const closedChains = [];
+  for (const [a, b] of segments) {
+    let current = { points: [a, b], closed: false };
+    // Repeatedly absorb whatever chain is dangling at either of `current`'s
+    // own ends — a single merge can expose a new end that immediately
+    // matches yet another pending chain (three-plus segments joining in
+    // sequence during one incoming segment's turn), so this loops to a
+    // stable result rather than checking just once.
+    for (;;) {
+      const sKey = key(current.points[0]);
+      const eKey = key(current.points[current.points.length - 1]);
+      if (sKey === eKey) {
+        current.closed = current.points.length > 2;
         break;
       }
+      const partner = pending.get(sKey) || pending.get(eKey);
+      if (!partner) break;
+      clearEnds(partner);
+      const joined = joinChainPair(current, partner, key);
+      if (!joined) break; // shouldn't happen given the map match above, but never loop forever on it
+      current = joined;
     }
+    if (current.closed) closedChains.push(current);
+    else setEnds(current);
   }
 
-  for (const chain of chains) {
-    if (chain.points.length > 2 && key(chain.points[0]) === key(chain.points[chain.points.length - 1])) {
-      chain.closed = true;
-    }
-  }
-  return chains;
+  // Whatever's left in `pending` is every remaining open chain — each
+  // contributes two map entries (its start and end key) pointing to the
+  // SAME chain object, so dedupe by identity before returning.
+  return [...closedChains, ...new Set(pending.values())];
+}
+
+/**
+ * Joins chain `B` onto chain `A` via whichever of the four end-to-end
+ * combinations actually shares an endpoint (by `key`), reversing either
+ * side as needed so the result reads as one continuous point sequence.
+ * Returns `null` if no shared endpoint is found.
+ * @param {{points: Array<{x:number,y:number}>}} A
+ * @param {{points: Array<{x:number,y:number}>}} B
+ * @param {(p:{x:number,y:number})=>string} key
+ * @returns {{points: Array<{x:number,y:number}>, closed: boolean}|null}
+ */
+function joinChainPair(A, B, key) {
+  const aStart = A.points[0];
+  const aEnd = A.points[A.points.length - 1];
+  const bStart = B.points[0];
+  const bEnd = B.points[B.points.length - 1];
+  if (key(aEnd) === key(bStart)) return { points: A.points.concat(B.points.slice(1)), closed: false };
+  if (key(aEnd) === key(bEnd)) return { points: A.points.concat([...B.points].reverse().slice(1)), closed: false };
+  if (key(aStart) === key(bEnd)) return { points: B.points.concat(A.points.slice(1)), closed: false };
+  if (key(aStart) === key(bStart)) return { points: [...B.points].reverse().concat(A.points.slice(1)), closed: false };
+  return null;
 }
 
 /**

@@ -29,12 +29,29 @@
 //      from a fresh page load, a different camera batch, etc.) consistently
 //      hit the same warm proxy cache entry.
 import { ensureGeoidReady, geoidHeight } from './geoid.js';
+import { getSharedCache } from './apiCache.js';
 
 /** Max points per outgoing request to `/api/terrain/heights` (see file header, point 1). */
 const CHUNK_SIZE = 200;
 
 /** Avoid repeatedly hitting a known-failing proxy from warm fallback reads. */
 const GEOID_FALLBACK_COOLDOWN_MS = 60_000;
+
+/**
+ * Durable (IndexedDB, cross-session) mirror of this module's in-memory
+ * `cache` Map — the in-memory cache alone means a fresh page load re-fetches
+ * every point from `/api/terrain/heights` even though ellipsoidal ground
+ * height at a given coordinate is effectively permanent (unlike, say,
+ * `data/traffic.js`'s per-road `scene.sampleHeight()` bake-in, there's no
+ * live-scene staleness risk here: this is a fixed terrain/geoid dataset
+ * behind the proxy, not a ray-pick against whatever's currently rendered).
+ * Only 'reearth'-sourced entries are mirrored — a 'geoid-fallback' entry is
+ * a degraded temporary substitute (see `cachedRealEllipsoidalGround`'s own
+ * comment on why floor consumers never trust it), not a real terrain value
+ * worth persisting.
+ */
+const TERRAIN_HEIGHT_CACHE_STORE = 'terrainHeights';
+const _durableCache = getSharedCache();
 
 /**
  * In-memory cache: `"lat.toFixed(5),lon.toFixed(5)"` -> `{ellipsoid, source}`.
@@ -181,6 +198,26 @@ export async function resolveEllipsoidalGround(coords) {
   // floor built on it. Give failed keys a short cooldown before re-requesting
   // so warm consumers do not hammer a failing proxy; after it expires, a
   // successful response replaces the fallback entry and clears the path.
+  // Warm the in-memory cache from the durable (IndexedDB) cache for any key
+  // not already warm, before deciding what's genuinely uncached — covers
+  // the common case of a repeat visit / fresh reload asking about ground
+  // height at a point already resolved in an earlier session, with no
+  // network round-trip at all.
+  const notYetWarm = work.filter((item) => !cache.has(item.key));
+  if (notYetWarm.length) {
+    const checked = new Set();
+    await Promise.all(notYetWarm.map(async (item) => {
+      if (checked.has(item.key)) return;
+      checked.add(item.key);
+      try {
+        const hit = await _durableCache.get(TERRAIN_HEIGHT_CACHE_STORE, item.key);
+        if (hit && Number.isFinite(hit.ellipsoid)) {
+          cache.set(item.key, { ellipsoid: hit.ellipsoid, source: 'reearth' });
+        }
+      } catch { /* durable cache unavailable — the network path below still covers it */ }
+    }));
+  }
+
   const uncached = [];
   const seenKeys = new Set();
   const now = Date.now();
@@ -211,6 +248,7 @@ export async function resolveEllipsoidalGround(coords) {
         // An omitted point now caches nothing and retries on the next warm.
         if (Number.isFinite(ellipsoid)) {
           cache.set(item.key, { ellipsoid, source: 'reearth' });
+          _durableCache.put(TERRAIN_HEIGHT_CACHE_STORE, item.key, { ellipsoid }).catch(() => { /* best-effort */ });
         }
       }
     } catch {

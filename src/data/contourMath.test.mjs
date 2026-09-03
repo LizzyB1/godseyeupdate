@@ -154,6 +154,51 @@ test('stitchSegmentsIntoPolylines leaves an unjoinable segment as its own open 2
   assert.deepEqual(chains[0].points, segments[0]);
 });
 
+test('stitchSegmentsIntoPolylines handles many fully-disjoint segments without merging any of them', () => {
+  // Regression guard for the endpoint-map rewrite (2026-09-03): every
+  // segment here is isolated (no shared endpoints at all), which used to
+  // be exactly the pathological case for the old restart-from-scratch
+  // nested-loop merge (worst-case O(n^3) in segment count). 2000 segments
+  // finishing well under a second is the actual behavioral guarantee that
+  // matters — the previous implementation would have been unusably slow
+  // at this count, not merely slower.
+  const segments = [];
+  for (let i = 0; i < 2000; i += 1) {
+    segments.push([{ x: i * 10, y: 0 }, { x: i * 10 + 1, y: 1 }]);
+  }
+  const start = Date.now();
+  const chains = stitchSegmentsIntoPolylines(segments);
+  const elapsedMs = Date.now() - start;
+  assert.equal(chains.length, 2000);
+  for (const chain of chains) assert.equal(chain.closed, false);
+  assert.ok(elapsedMs < 2000, `expected well under 2s for 2000 disjoint segments, took ${elapsedMs}ms`);
+});
+
+test('stitchSegmentsIntoPolylines stitches a long chain of many segments end-to-end', () => {
+  // A single 2000-segment zigzag chain, submitted in scrambled order —
+  // exercises the same "many chains, lots of merging" shape that used to
+  // trigger the O(n^3) worst case, this time actually merging down to one.
+  const points = [];
+  for (let i = 0; i <= 2000; i += 1) points.push({ x: i, y: i % 2 });
+  const segments = [];
+  for (let i = 0; i < points.length - 1; i += 1) segments.push([points[i], points[i + 1]]);
+  for (let i = segments.length - 1; i > 0; i -= 1) {
+    const j = (i * 2654435761) % (i + 1);
+    [segments[i], segments[j]] = [segments[j], segments[i]];
+  }
+  const start = Date.now();
+  const chains = stitchSegmentsIntoPolylines(segments);
+  const elapsedMs = Date.now() - start;
+  assert.equal(chains.length, 1);
+  assert.equal(chains[0].closed, false);
+  assert.equal(chains[0].points.length, points.length);
+  const ends = [chains[0].points[0], chains[0].points[chains[0].points.length - 1]];
+  const hasPoint = (p) => ends.some((e) => e.x === p.x && e.y === p.y);
+  assert.ok(hasPoint(points[0]));
+  assert.ok(hasPoint(points[points.length - 1]));
+  assert.ok(elapsedMs < 2000, `expected well under 2s for a 2000-segment chain, took ${elapsedMs}ms`);
+});
+
 test('smoothPolyline with 0 iterations (or too few points) returns the input unchanged', () => {
   const pts = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 1 }];
   assert.equal(smoothPolyline(pts, 0, false), pts);

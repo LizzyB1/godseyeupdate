@@ -30,6 +30,9 @@ const POLL_MS = 5000;
 const STORE_LABELS = {
   geocode: 'Reverse-geocoded addresses',
   bathyDepth: 'Bathymetry depth samples',
+  mapContourLines: 'Contour line geometry',
+  trafficRoadData: 'Traffic road geometry (Overpass)',
+  terrainHeights: 'Terrain point heights',
 };
 
 function labelFor(storeName) {

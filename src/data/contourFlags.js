@@ -64,8 +64,8 @@ import { PANEL_LABELS } from '../panelVisibility.js';
 const BASE_LABEL_OFFSET = new Cesium.Cartesian2(0, -10);
 /** Ring labels have no marker dot to clear, so they can sit closer to their own anchor point. */
 const RING_LABEL_OFFSET = new Cesium.Cartesian2(0, -4);
-/** Extra clearance kept past an obstructing panel's edge once a flag is nudged clear of it. */
-const AVOIDANCE_MARGIN_PX = 14;
+/** Extra clearance kept past an obstructing panel's edge once a flag is nudged clear of it — i.e. how far a flag "stands off" a panel, not just whether it clears it. Widened from the original 14px per a direct ask for a bigger, more obvious buffer around control boxes. */
+const AVOIDANCE_MARGIN_PX = 26;
 /** Default plaque text size if a caller doesn't supply its own — matches the flags' original look. */
 export const DEFAULT_FLAG_FONT_SIZE = 22;
 /** Default ring-label text size — smaller than a flag's, since a ring label is a quiet "which line is this" cue, not a big call-out. */
@@ -133,8 +133,12 @@ export function buildContourFlags({ viewer, dataSource, spots, formatValue, pole
       });
       // Tag with its own resting offset so `installFlagAvoidance` — shared
       // with `buildRingLabels`'s smaller-offset entities — nudges each
-      // entity out from its OWN base position, not a hardcoded one.
+      // entity out from its OWN base position, not a hardcoded one. Also
+      // tag its font size directly (rather than parsing it back out of the
+      // CSS font shorthand string) so the same handler's mutual-overlap
+      // check can estimate this label's on-screen footprint.
       entity._gevBaseOffset = BASE_LABEL_OFFSET;
+      entity._gevFontSize = fontSize;
       entities.push(entity);
     }
   }
@@ -166,6 +170,7 @@ export function buildRingLabels({ dataSource, rings, formatValue, fontSize = DEF
       },
     });
     entity._gevBaseOffset = RING_LABEL_OFFSET;
+    entity._gevFontSize = fontSize;
     entities.push(entity);
   }
   return entities;
@@ -212,28 +217,50 @@ function visiblePanelRects() {
 }
 
 /**
- * Given a flag's natural (unshifted) screen position, return the extra
- * pixel offset — `{x: 0, y: 0}` if nothing obstructs it — needed to clear
- * every currently-visible panel it would otherwise land under. Always
- * shifts right, past the widest obstructing panel's right edge: most of
- * the app's control boxes anchor along the left/top edges by default, so a
- * panel obstructing a flag is more often than not anchored to its left,
- * and shifting right moves the flag toward open canvas rather than
- * off-screen. A flag placed on the view's own east edge (see
- * `data/mapOverlays.js`'s `flagEdges`) is the one case this can push
- * slightly further right than ideal, but simple beats another axis of
- * per-edge special-casing for a rare, self-correcting overlap.
+ * Given a flag's natural (unshifted) screen position and an already-fetched
+ * list of panel rects, return the extra pixel offset — `{x: 0, y: 0}` if
+ * nothing obstructs it — needed to clear every one of them. Always shifts
+ * right, past the widest obstructing panel's right edge: most of the app's
+ * control boxes anchor along the left/top edges by default, so a panel
+ * obstructing a flag is more often than not anchored to its left, and
+ * shifting right moves the flag toward open canvas rather than off-screen.
+ * A flag placed on the view's own east edge (see `data/mapOverlays.js`'s
+ * `flagEdges`) is the one case this can push slightly further right than
+ * ideal, but simple beats another axis of per-edge special-casing for a
+ * rare, self-correcting overlap.
+ *
+ * Split out from {@link computePanelAvoidanceOffset} so `installFlagAvoidance`
+ * can fetch `visiblePanelRects()` ONCE per rendered frame and reuse it
+ * across every entity, instead of every entity independently re-walking
+ * the panel list and forcing a fresh `getBoundingClientRect()` layout read
+ * for each one.
  * @param {number} screenX @param {number} screenY
+ * @param {Array<DOMRect>} rects
  * @returns {{x:number, y:number}}
  */
-export function computePanelAvoidanceOffset(screenX, screenY) {
+function panelAvoidanceOffsetFromRects(screenX, screenY, rects) {
   let shiftRight = 0;
-  for (const rect of visiblePanelRects()) {
+  for (const rect of rects) {
     if (screenX >= rect.left && screenX <= rect.right && screenY >= rect.top && screenY <= rect.bottom) {
       shiftRight = Math.max(shiftRight, rect.right - screenX + AVOIDANCE_MARGIN_PX);
     }
   }
   return { x: shiftRight, y: 0 };
+}
+
+/**
+ * Given a flag's natural (unshifted) screen position, return the extra
+ * pixel offset needed to clear every currently-visible panel it would
+ * otherwise land under — see {@link panelAvoidanceOffsetFromRects}, which
+ * this just calls with a fresh `visiblePanelRects()`. Kept as its own
+ * export for any one-off caller that isn't iterating a whole entity list
+ * per frame (`installFlagAvoidance` calls the rects-based version directly
+ * instead, to fetch panel rects only once per frame).
+ * @param {number} screenX @param {number} screenY
+ * @returns {{x:number, y:number}}
+ */
+export function computePanelAvoidanceOffset(screenX, screenY) {
+  return panelAvoidanceOffsetFromRects(screenX, screenY, visiblePanelRects());
 }
 
 /** Fraction of the canvas, centered on it, that flag/ring labels are biased to stay within — see `computeCenterBiasOffset`. 0.75 means a 12.5%-wide margin is kept clear on every side. */
@@ -265,12 +292,84 @@ export function computeCenterBiasOffset(screenX, screenY, width, height) {
   return { x, y };
 }
 
+/** Rough average glyph width, as a fraction of font-size-in-px, for the bold sans-serif label font `dropShadowLabelProps` uses — enough to estimate a label's on-screen footprint without an actual canvas text-measure call (too expensive to do per label per frame). */
+const GLYPH_WIDTH_FRACTION = 0.62;
+/** Extra clearance kept between two labels' estimated boxes before they're considered to be overlapping. */
+const LABEL_OVERLAP_PAD_PX = 3;
+/** Vertical step size tried when nudging a label clear of another one already placed this frame. */
+const LABEL_DECLUTTER_STEP_PX = 16;
+/** How many nudge attempts (alternating up/down, growing each time) before giving up and hiding a label rather than leaving it piled on another. */
+const LABEL_DECLUTTER_MAX_STEPS = 3;
+
+/**
+ * Estimates a label's on-screen bounding box from its final anchor point,
+ * text, and font size — text width isn't actually measured (a real
+ * `CanvasRenderingContext2D.measureText` call per label per frame would
+ * defeat the point of keeping this cheap), just approximated from
+ * character count. `dropShadowLabelProps` anchors every label
+ * horizontally CENTERED and vertically at its BOTTOM, so the box sits
+ * centered above `(anchorX, anchorY)`.
+ * @param {number} anchorX @param {number} anchorY
+ * @param {string} text @param {number} fontSizePx
+ * @returns {{left:number, right:number, top:number, bottom:number}}
+ */
+export function estimateLabelBox(anchorX, anchorY, text, fontSizePx) {
+  const charWidth = fontSizePx * GLYPH_WIDTH_FRACTION;
+  const width = Math.max(charWidth * 2, (text?.length || 1) * charWidth);
+  const height = fontSizePx * 1.15;
+  return {
+    left: anchorX - width / 2,
+    right: anchorX + width / 2,
+    top: anchorY - height,
+    bottom: anchorY,
+  };
+}
+
+function boxesOverlap(a, b) {
+  return a.left < b.right + LABEL_OVERLAP_PAD_PX
+    && a.right > b.left - LABEL_OVERLAP_PAD_PX
+    && a.top < b.bottom + LABEL_OVERLAP_PAD_PX
+    && a.bottom > b.top - LABEL_OVERLAP_PAD_PX;
+}
+
+/**
+ * Given a label's estimated box and every OTHER label already placed this
+ * frame, finds a small vertical nudge that clears all of them, or reports
+ * that this label should be hidden instead. Tries the unshifted position
+ * first, then alternates up/down in growing steps
+ * (`LABEL_DECLUTTER_STEP_PX` × 1, 1, 2, 2, 3, 3…) up to
+ * `LABEL_DECLUTTER_MAX_STEPS` each way — cheap since the per-frame label
+ * count is small (tens, not thousands), so an O(placed) scan per candidate
+ * is negligible. A label that still can't fit anywhere is hidden rather
+ * than left stacked illegibly on top of another — the "or get rid of them"
+ * half of the ask, applied only when avoidance alone can't do the job.
+ * @param {{left:number,right:number,top:number,bottom:number}} box
+ * @param {Array<{left:number,right:number,top:number,bottom:number}>} placed
+ * @returns {{visible:boolean, extraY:number}}
+ */
+export function resolveLabelOverlap(box, placed) {
+  const candidates = [0];
+  for (let i = 1; i <= LABEL_DECLUTTER_MAX_STEPS; i += 1) {
+    candidates.push(-LABEL_DECLUTTER_STEP_PX * i, LABEL_DECLUTTER_STEP_PX * i);
+  }
+  for (const extraY of candidates) {
+    const shifted = { left: box.left, right: box.right, top: box.top + extraY, bottom: box.bottom + extraY };
+    if (!placed.some((p) => boxesOverlap(shifted, p))) return { visible: true, extraY };
+  }
+  return { visible: false, extraY: 0 };
+}
+
 /**
  * Install a `scene.postRender` listener that keeps every entity returned by
- * `getEntities()` clear of the app's currently-visible panels AND biased
- * toward the central 3/4 of the screen, by adjusting each entity's
- * `label.pixelOffset` in place every frame. Cheap and idempotent per call;
- * returns a remover.
+ * `getEntities()` clear of the app's currently-visible panels, biased
+ * toward the central 3/4 of the screen, AND clear of every other label in
+ * the same set — nudging one vertically when it would otherwise land on
+ * top of a label already placed this frame, and hiding it outright if even
+ * that can't find it a clear spot. All of this only ever adjusts each
+ * entity's `label.pixelOffset` (and, for the declutter case,
+ * `label.show`) — the underlying world position never moves, so panning
+ * the true spot into the clear snaps everything back automatically.
+ * Cheap and idempotent per call; returns a remover.
  * @param {Cesium.Viewer} viewer
  * @param {() => Array<Cesium.Entity>} getEntities - called fresh each frame, so a rebuilt flag set is picked up automatically.
  * @returns {() => void} call to uninstall.
@@ -284,13 +383,18 @@ export function installFlagAvoidance(viewer, getEntities) {
     const canvas = viewer.scene.canvas;
     const width = canvas?.clientWidth || 0;
     const height = canvas?.clientHeight || 0;
+    // Fetched ONCE per frame (each rect a forced-layout getBoundingClientRect
+    // read) and reused for every entity below, rather than every entity
+    // independently re-walking the panel list.
+    const panelRects = visiblePanelRects();
+    const placedBoxes = [];
     for (const entity of entities) {
       if (!entity.label || entity.isDestroyed?.()) continue;
       const pos = entity.position?.getValue(now);
       if (!pos) continue;
       const screen = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, pos);
       if (!screen) continue;
-      const avoidPanel = computePanelAvoidanceOffset(screen.x, screen.y);
+      const avoidPanel = panelAvoidanceOffsetFromRects(screen.x, screen.y, panelRects);
       // Center-bias runs against the post-panel-avoidance position, since
       // that's where the label would actually land — no point pulling
       // toward center from a spot it's about to be shifted away from.
@@ -298,10 +402,20 @@ export function installFlagAvoidance(viewer, getEntities) {
         ? computeCenterBiasOffset(screen.x + avoidPanel.x, screen.y + avoidPanel.y, width, height)
         : { x: 0, y: 0 };
       const base = entity._gevBaseOffset || BASE_LABEL_OFFSET;
-      entity.label.pixelOffset = new Cesium.Cartesian2(
-        base.x + avoidPanel.x + avoidCenter.x,
-        base.y + avoidPanel.y + avoidCenter.y,
-      );
+      const offsetX = base.x + avoidPanel.x + avoidCenter.x;
+      const offsetY = base.y + avoidPanel.y + avoidCenter.y;
+
+      const fontSize = entity._gevFontSize || DEFAULT_FLAG_FONT_SIZE;
+      // `label.text` is a Cesium Property (constant here, but still a
+      // Property, not a raw string) — same pattern as `entity.position`
+      // above, resolved through `.getValue(now)` rather than read directly.
+      const labelText = entity.label.text?.getValue ? entity.label.text.getValue(now) : entity.label.text;
+      const box = estimateLabelBox(screen.x + offsetX, screen.y + offsetY, labelText, fontSize);
+      const resolved = resolveLabelOverlap(box, placedBoxes);
+      entity.label.show = resolved.visible;
+      if (!resolved.visible) continue;
+      placedBoxes.push({ left: box.left, right: box.right, top: box.top + resolved.extraY, bottom: box.bottom + resolved.extraY });
+      entity.label.pixelOffset = new Cesium.Cartesian2(offsetX, offsetY + resolved.extraY);
     }
   };
   const remove = viewer.scene.postRender.addEventListener(handler);

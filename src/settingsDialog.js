@@ -3,6 +3,7 @@ import { FIRST_RUN_MISSIONS, environmentalLabel, runFirstRunChoice } from './fir
 import { SERVER_API_KEY_DEFS } from './data/sessionSettings.js';
 import { saveSessionSettings } from './sessionSettingsClient.js';
 import { showAllPanels } from './panelVisibility.js';
+import { TIERS, TIER_LABELS, loadStoredTier, saveTier, applyTier } from './renderQuality.js';
 
 /** Panels reset to their as-shipped collapsed state by "Reset panel layout" — every id
  * that participates in the generic `.panel-collapse-btn[data-collapse-target]` mechanism. */
@@ -89,6 +90,9 @@ const SETTINGS_MISSION_CHOICES = ['contacts', 'space-missions', 'environmental']
 export class SettingsDialog {
   constructor() {
     restoreAlphaEarly();
+    /** Set by attachRenderTargets() once the viewer/tileset/sharpen stage exist — see that method. */
+    this._renderTargets = null;
+    this._renderQualityTier = loadStoredTier();
     /** Set by attachMissionRunner() once styleManager/dataManager exist. */
     this._missionDeps = null;
     this._missionBusy = false;
@@ -160,6 +164,14 @@ export class SettingsDialog {
           <span aria-hidden="true">◐</span>
           <input type="range" id="gev-opacity-slider" min="${MIN_ALPHA}" max="${MAX_ALPHA}" step="0.01">
           <span aria-hidden="true">◑</span>
+        </div>
+      </section>
+
+      <section class="gev-settings-section">
+        <h3 class="gev-settings-section-title">Render quality</h3>
+        <p class="gev-settings-section-help">Trades streamed tile detail, antialiasing, and the sharpen effect for GPU/battery cost. "Balanced" is how the app has always looked — pick "Performance" on an integrated GPU or laptop battery.</p>
+        <div class="mapovl-row" id="gev-settings-quality-row">
+          ${TIERS.map((tier) => `<button type="button" class="mapovl-btn" data-quality-tier="${tier}" title="${TIER_LABELS[tier].hint}">${TIER_LABELS[tier].label}</button>`).join('')}
         </div>
       </section>
 
@@ -243,6 +255,17 @@ export class SettingsDialog {
       applyAlpha(alpha);
       saveAlpha(alpha);
     });
+
+    this._qualityButtons = [...dialog.querySelectorAll('[data-quality-tier]')];
+    this._markActiveQualityTier();
+    for (const button of this._qualityButtons) {
+      button.addEventListener('click', () => {
+        this._renderQualityTier = button.dataset.qualityTier;
+        saveTier(this._renderQualityTier);
+        this._markActiveQualityTier();
+        if (this._renderTargets) applyTier(this._renderQualityTier, this._renderTargets);
+      });
+    }
 
     for (const button of dialog.querySelectorAll('[data-mission]')) {
       button.addEventListener('click', () => this._runMission(button.dataset.mission));
@@ -362,6 +385,29 @@ export class SettingsDialog {
       else input.placeholder = 'not set';
     }
     this._flashStatus(dialog, clearAll ? 'Server keys cleared.' : 'Server keys saved — takes effect immediately.');
+  }
+
+  _markActiveQualityTier() {
+    for (const button of this._qualityButtons || []) {
+      button.classList.toggle('is-active', button.dataset.qualityTier === this._renderQualityTier);
+    }
+  }
+
+  /**
+   * Wires the "Render quality" control up to the live Cesium objects it
+   * actually controls, and immediately applies whichever tier was last
+   * saved (or the default) to them. Called from main.js once the viewer,
+   * the Google 3D Tileset (may be null — the app falls back to the plain
+   * Cesium globe when Google 3D Tiles fail to load, in which case the
+   * tileset-detail knob is simply inert until a stack switch adds one),
+   * and the sharpen post-process stage all exist — this dialog is built
+   * at module load time, well before any of those, so it can't reach them
+   * on its own.
+   * @param {{viewer: import('cesium').Viewer, tileset: import('cesium').Cesium3DTileset|null, sharpenStage: import('cesium').PostProcessStage|null}} targets
+   */
+  attachRenderTargets(targets) {
+    this._renderTargets = targets;
+    applyTier(this._renderQualityTier, targets);
   }
 
   _flashStatus(dialog, text) {

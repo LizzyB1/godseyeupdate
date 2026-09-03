@@ -243,6 +243,17 @@ async function init() {
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
     const styleManager = new StyleManager(viewer, { mapStackController });
+
+    // Apply the last-saved (or default "balanced" — see renderQuality.js)
+    // render-quality tier now that the viewer, the Google 3D Tileset (may
+    // be null on a fallback boot — applyTier skips that knob gracefully),
+    // and the sharpen stage all exist. Also hands the Settings dialog's
+    // "Render quality" buttons the live objects to act on going forward.
+    window.__godsEyeView?.settingsDialog?.attachRenderTargets?.({
+      viewer,
+      tileset,
+      sharpenStage: styleManager.getSharpenStage?.(),
+    });
     // The previous multi-canvas weather compositor remains disabled. Cockpit
     // clouds use a separate, capped low-resolution GPU pass that never attaches
     // Cesium fog or post-process stages and is fully stopped in map mode.
