@@ -188,25 +188,40 @@ export class MapOverlayControls {
     gridSpacingSelect.addEventListener('change', () => this.engine.setGridSpacingDeg(Number(gridSpacingSelect.value)));
     gridColorInput.addEventListener('input', () => this.engine.setGridColor(gridColorInput.value));
 
-    // ── Line value labels ────────────────────────────────────────────
-    // One combined toggle for both overlays above: when on, every grid
-    // line currently drawn gets its lat/long, and every major contour
-    // line gets its height, in large on-screen text — only for lines
-    // already computed for the current viewport, so this never needs its
-    // own visible-viewport filtering (see mapOverlays.js).
+    // ── Grid line labels ─────────────────────────────────────────────
+    // Only for lines already computed for the current viewport, so this
+    // never needs its own visible-viewport filtering (see mapOverlays.js).
     const labelSection = el('div', 'mapovl-section');
-    labelSection.appendChild(el('div', 'mapovl-section-title', 'LINE LABELS'));
+    labelSection.appendChild(el('div', 'mapovl-section-title', 'GRID LINE LABELS'));
     const labelRow = el('label', 'mapovl-row');
     const labelEnable = document.createElement('input');
     labelEnable.type = 'checkbox';
     labelEnable.checked = this.engine.state.lineLabelsEnabled;
     labelRow.appendChild(labelEnable);
-    labelRow.appendChild(document.createTextNode('Show grid/contour value labels'));
+    labelRow.appendChild(document.createTextNode('Show grid value labels'));
     labelSection.appendChild(labelRow);
-    labelSection.appendChild(el('div', 'mapovl-hint', 'Large lat/long labels on grid lines, height labels on major contour lines.'));
+    labelSection.appendChild(el('div', 'mapovl-hint', 'Large lat/long labels on grid lines.'));
     body.appendChild(labelSection);
 
     labelEnable.addEventListener('change', () => this.engine.setLineLabelsEnabled(labelEnable.checked));
+
+    // ── Contour elevation flags ─────────────────────────────────────────
+    // Independent of both "Show contour lines" and the grid labels above —
+    // a big pole+plaque flag on every major contour line currently on
+    // screen, biased toward the view's west edge (see data/contourFlags.js).
+    const flagSection = el('div', 'mapovl-section');
+    flagSection.appendChild(el('div', 'mapovl-section-title', 'CONTOUR FLAGS'));
+    const flagRow = el('label', 'mapovl-row');
+    const flagEnable = document.createElement('input');
+    flagEnable.type = 'checkbox';
+    flagEnable.checked = this.engine.state.contourFlagsEnabled;
+    flagRow.appendChild(flagEnable);
+    flagRow.appendChild(document.createTextNode('Show elevation flags'));
+    flagSection.appendChild(flagRow);
+    flagSection.appendChild(el('div', 'mapovl-hint', 'Big numbered flags on major contour lines, toward the west edge of the view. Needs "Show contour lines" on to have anything to flag. Nudges clear of any control panel in the way.'));
+    body.appendChild(flagSection);
+
+    flagEnable.addEventListener('change', () => this.engine.setContourFlagsEnabled(flagEnable.checked));
 
     // ── Reset ─────────────────────────────────────────────────────────
     const resetBtn = document.createElement('button');
@@ -223,6 +238,7 @@ export class MapOverlayControls {
       gridSpacingSelect.value = String(this.engine.state.gridSpacingDeg);
       gridColorInput.value = this.engine.state.gridColor;
       labelEnable.checked = false;
+      flagEnable.checked = false;
       this._setContourStatus('');
     });
     body.appendChild(resetBtn);

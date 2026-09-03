@@ -1,9 +1,10 @@
 import * as Cesium from 'cesium';
-import { marchingSquaresSegments, gridToLonLat } from './contourMath.js';
+import { marchingSquaresSegments, gridToLonLat, westmostSegmentPoint } from './contourMath.js';
 import { formatLatLonDMS, formatLatLonDecimal, googleMapsLink, formatHeight, toDMS } from './coordFormat.js';
 import { resolveApiKey } from '../apiKeys.js';
 import { sampleSceneHeights } from './sceneHeight.js';
 import { getSharedCache } from './apiCache.js';
+import { buildContourFlags, installFlagAvoidance } from './contourFlags.js';
 
 /**
  * @file Cesium-facing engine behind the "Map Overlays" control box: elevation
@@ -64,12 +65,16 @@ export const DEFAULT_STATE = Object.freeze({
   gridSpacingDeg: 1,
   gridColor: '#00d4ff',
   gridMinorColor: '#3a5a66',
-  // Large-text value labels on whichever grid/contour lines are currently
-  // shown — lat/long for grid lines, height for (major) contour lines.
+  // Large-text lat/long labels on whichever grid lines are currently shown.
   // Only ever drawn for lines already computed for the current viewport
-  // (see `_recomputeGrid`/`_recomputeContours`), so there's nothing extra
-  // to cull: on screen == in the visible viewport, by construction.
+  // (see `_recomputeGrid`), so there's nothing extra to cull: on screen ==
+  // in the visible viewport, by construction.
   lineLabelsEnabled: false,
+  // Big "flag" call-outs (pole + numbered plaque) on every major contour
+  // line currently on screen — a separate toggle from `lineLabelsEnabled`
+  // (grid) and from `contoursEnabled` (the lines themselves): the flags can
+  // be shown/hidden independently of both. See `data/contourFlags.js`.
+  contourFlagsEnabled: false,
 });
 
 /** Font for grid/contour line value labels — deliberately large, per the
@@ -101,13 +106,20 @@ export class MapOverlaysEngine {
 
     this._contourPrimitive = null;
     this._gridPrimitive = null;
-    this._contourLabelPrimitive = null;
     this._gridLabelPrimitive = null;
     this._recomputeTimer = null;
     this._contourStatus = ''; // status line shown in the UI
     this._computeToken = 0;
     /** Whether a sparse-height retry has already fired for the in-flight recompute cycle — bounds it to one retry, never a loop. */
     this._retriedThisCycle = false;
+
+    // Elevation-flag entities (see data/contourFlags.js) — a separate
+    // CustomDataSource from the plain contour lines (which are raw
+    // PolylineCollection primitives) since flags toggle independently.
+    this._contourFlagDataSource = new Cesium.CustomDataSource('mapOverlaysContourFlags');
+    this.viewer.dataSources.add(this._contourFlagDataSource);
+    this._contourFlagEntities = [];
+    this._removeFlagAvoidance = installFlagAvoidance(this.viewer, () => this._contourFlagEntities);
 
     this._cursorActive = false;
     this._cursorEntity = null;
@@ -199,32 +211,41 @@ export class MapOverlaysEngine {
     if (this.state.contoursEnabled && this.state.contourMinorEnabled) this._scheduleRecompute();
   }
 
-  // ── line value labels (grid + contour, shared toggle) ────────────────
+  // ── grid line value labels ──────────────────────────────────────────
   /**
-   * Large-text value labels on whichever grid/contour lines are currently
-   * on screen: each grid line gets its lat or long, each major contour
-   * line gets its height. One combined toggle for both, since they're the
-   * same idea (label the line with the value it represents) applied to
-   * two different overlay types.
+   * Large-text lat/long value labels on whichever grid lines are currently
+   * on screen. Separate from `contourFlagsEnabled` (the elevation flags on
+   * contour lines) — the two used to share one toggle, but each now
+   * switches on/off independently.
    */
   setLineLabelsEnabled(enabled) {
     this.state.lineLabelsEnabled = Boolean(enabled);
     this._persist();
-    // Labels ride along with each feature's own recompute (grid's is
-    // synchronous, contours' goes through the debounced scheduler) so the
-    // add-or-clear decision only has to live in one place per feature —
-    // see the `this.state.lineLabelsEnabled` checks in `_recomputeGrid`
-    // and `_recomputeContours`. Neither call does anything if its own
-    // feature (grid/contours) isn't enabled, matching the existing pattern.
+    // Labels ride along with the grid's own recompute (synchronous) so the
+    // add-or-clear decision only has to live in `_recomputeGrid`'s own
+    // `this.state.lineLabelsEnabled` check, which does nothing if the grid
+    // itself isn't enabled.
     if (this.state.gridEnabled) this._recomputeGrid();
-    if (this.state.contoursEnabled) this._scheduleRecompute();
   }
 
-  _clearContourLabels() {
-    if (this._contourLabelPrimitive) {
-      this.viewer.scene.primitives.remove(this._contourLabelPrimitive);
-      this._contourLabelPrimitive = null;
-    }
+  // ── contour elevation flags ─────────────────────────────────────────
+  /**
+   * Big "flag" call-outs (pole + numbered plaque, see data/contourFlags.js)
+   * on every major contour line currently on screen. Separate from
+   * `contoursEnabled` (the lines themselves) and from `lineLabelsEnabled`
+   * (grid labels) — this can be toggled independently of both, though it
+   * has nothing to draw unless contour lines are also being computed.
+   */
+  setContourFlagsEnabled(enabled) {
+    this.state.contourFlagsEnabled = Boolean(enabled);
+    this._persist();
+    if (this.state.contourFlagsEnabled && this.state.contoursEnabled) this._scheduleRecompute();
+    else if (!this.state.contourFlagsEnabled) this._clearContourFlags();
+  }
+
+  _clearContourFlags() {
+    this._contourFlagDataSource.entities.removeAll();
+    this._contourFlagEntities = [];
   }
 
   _clearGridLabels() {
@@ -239,7 +260,7 @@ export class MapOverlaysEngine {
       this.viewer.scene.primitives.remove(this._contourPrimitive);
       this._contourPrimitive = null;
     }
-    this._clearContourLabels();
+    this._clearContourFlags();
     this._setStatus('');
   }
 
@@ -315,13 +336,13 @@ export class MapOverlaysEngine {
     const majorColor = Cesium.Color.fromCssColorString('#ffd60a').withAlpha(0.85);
     const minorColor = Cesium.Color.fromCssColorString('#ffd60a').withAlpha(0.35);
 
-    // For each major level, remember the segment midpoint closest to the
-    // view center — that's where its value label goes (if labels are on),
-    // one per level rather than one per segment so a level with many
-    // crossings doesn't spam the screen with repeated labels.
-    const centerLon = (west + east) / 2;
-    const centerLat = (south + north) / 2;
-    const bestLabelSpotByLevel = new Map();
+    // For each major level, remember whichever segment endpoint sits
+    // closest to the view's west edge — that's where its flag goes (see
+    // data/contourFlags.js), one per level rather than one per segment so a
+    // level with many crossings doesn't spam the screen with repeated
+    // flags. Biased west rather than view-center so a returning viewer
+    // always finds a level's flag in the same relative spot.
+    const flagSpotByLevel = new Map();
 
     const newPrimitive = new Cesium.PolylineCollection();
     let segmentCount = 0;
@@ -339,16 +360,11 @@ export class MapOverlaysEngine {
           material: Cesium.Material.fromType('Color', { color: isMajor ? majorColor : minorColor }),
         });
         segmentCount += 1;
+      }
 
-        if (isMajor) {
-          const midLon = (aLL.lon + bLL.lon) / 2;
-          const midLat = (aLL.lat + bLL.lat) / 2;
-          const distSq = (midLon - centerLon) ** 2 + (midLat - centerLat) ** 2;
-          const existing = bestLabelSpotByLevel.get(height);
-          if (!existing || distSq < existing.distSq) {
-            bestLabelSpotByLevel.set(height, { distSq, lon: midLon, lat: midLat });
-          }
-        }
+      if (isMajor) {
+        const spot = westmostSegmentPoint(segs, rows, cols, west, south, east, north);
+        if (spot) flagSpotByLevel.set(height, spot);
       }
     }
 
@@ -357,26 +373,21 @@ export class MapOverlaysEngine {
     if (segmentCount > 0) {
       this._contourPrimitive = this.viewer.scene.primitives.add(newPrimitive);
       this._setStatus(`${levels.length} level${levels.length === 1 ? '' : 's'}, ${segmentCount} segments (${Math.round(minH)}–${Math.round(maxH)} m relief).`);
-      if (this.state.lineLabelsEnabled) {
-        const labelPrimitive = new Cesium.LabelCollection();
-        for (const [height, spot] of bestLabelSpotByLevel) {
-          labelPrimitive.add({
-            position: Cesium.Cartesian3.fromDegrees(spot.lon, spot.lat, height),
-            text: formatHeight(height),
-            font: LINE_LABEL_FONT,
-            fillColor: majorColor,
-            outlineColor: Cesium.Color.BLACK,
-            outlineWidth: 4,
-            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-            horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-            verticalOrigin: Cesium.VerticalOrigin.CENTER,
-          });
-        }
-        this._contourLabelPrimitive = this.viewer.scene.primitives.add(labelPrimitive);
-      }
     } else {
       newPrimitive.destroy();
       this._setStatus(`Flat here — ${Math.round(minH)}–${Math.round(maxH)} m relief, no contour crossing.`);
+    }
+
+    if (this.state.contourFlagsEnabled) {
+      this._contourFlagEntities = buildContourFlags({
+        viewer: this.viewer,
+        dataSource: this._contourFlagDataSource,
+        spots: flagSpotByLevel,
+        formatValue: formatHeight,
+        color: majorColor,
+      });
+    } else {
+      this._clearContourFlags();
     }
   }
 
@@ -691,7 +702,9 @@ export class MapOverlaysEngine {
   destroy() {
     this.viewer.camera.moveEnd.removeEventListener(this._onCameraMoveEnd);
     if (this._recomputeTimer) clearTimeout(this._recomputeTimer);
+    this._removeFlagAvoidance?.();
     this._clearContours();
+    this.viewer.dataSources.remove(this._contourFlagDataSource, true);
     this._clearGrid();
     this._uninstallCursorHandler();
     this.clearCursor();

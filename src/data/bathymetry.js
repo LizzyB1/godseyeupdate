@@ -1,13 +1,17 @@
 import * as Cesium from 'cesium';
 import { getSharedCache } from './apiCache.js';
 import { registerDynamicCredit, GEBCO_DEPTH_CREDIT } from './dataCredits.js';
-import { marchingSquaresSegments, gridToLonLat } from './contourMath.js';
+import { marchingSquaresSegments, gridToLonLat, westmostSegmentPoint } from './contourMath.js';
+import { buildContourFlags, installFlagAvoidance } from './contourFlags.js';
 
 /**
  * @file Cesium-facing engine behind the "Bathymetry" control box: undersea
- * depth contour lines (isobaths) and a grid of point depth-marker readouts,
- * both drawn over the currently-visible ocean area and refreshed as the
- * camera moves. See `src/bathymetryBox.js` for the control box.
+ * depth contour lines (isobaths), a grid of point depth-marker readouts,
+ * and big numbered "flag" call-outs on the contour lines (see
+ * `data/contourFlags.js` — shared with the land-elevation contour flags in
+ * `data/mapOverlays.js`), all drawn over the currently-visible ocean area
+ * and refreshed as the camera moves. See `src/bathymetryBox.js` for the
+ * control box.
  *
  * Single free, no-API-key data source, used for BOTH layers: Open Topo
  * Data's public REST API (api.opentopodata.org), querying the GEBCO2020
@@ -84,6 +88,11 @@ const MARKER_TEXT_COLOR = Cesium.Color.fromCssColorString('#bfe6ff');
 export const DEFAULT_STATE = Object.freeze({
   contoursEnabled: false,
   markersEnabled: false,
+  // Big "flag" call-outs (pole + numbered plaque) on every depth contour
+  // level currently on screen — separate from `contoursEnabled` (the
+  // lines themselves), though it has nothing to draw unless contours are
+  // also being computed. See data/contourFlags.js.
+  depthFlagsEnabled: false,
 });
 
 function loadState() {
@@ -130,8 +139,12 @@ export class BathymetryEngine {
 
     this._contourDataSource = new Cesium.CustomDataSource('bathymetryContours');
     this._markerDataSource = new Cesium.CustomDataSource('bathymetryMarkers');
+    this._flagDataSource = new Cesium.CustomDataSource('bathymetryDepthFlags');
     this.viewer.dataSources.add(this._contourDataSource);
     this.viewer.dataSources.add(this._markerDataSource);
+    this.viewer.dataSources.add(this._flagDataSource);
+    this._flagEntities = [];
+    this._removeFlagAvoidance = installFlagAvoidance(this.viewer, () => this._flagEntities);
 
     this._recomputeTimer = null;
     this._gridToken = 0;
@@ -191,6 +204,7 @@ export class BathymetryEngine {
     } else {
       this._contourDataSource.entities.removeAll();
       this._contourResultText = '';
+      this._clearDepthFlags(); // flags have nothing to attach to without the lines
       this._emitStatus();
     }
   }
@@ -206,6 +220,24 @@ export class BathymetryEngine {
       this._markerResultText = '';
       this._emitStatus();
     }
+  }
+
+  /**
+   * Big "flag" call-outs (pole + numbered plaque, see data/contourFlags.js)
+   * on every depth contour level currently on screen. Separate from
+   * `contoursEnabled` (the lines themselves) — toggles independently,
+   * though it has nothing to draw unless contours are also being computed.
+   */
+  setDepthFlagsEnabled(enabled) {
+    this.state.depthFlagsEnabled = Boolean(enabled);
+    this._persist();
+    if (this.state.depthFlagsEnabled && this.state.contoursEnabled) this._scheduleRecompute();
+    else if (!this.state.depthFlagsEnabled) this._clearDepthFlags();
+  }
+
+  _clearDepthFlags() {
+    this._flagDataSource.entities.removeAll();
+    this._flagEntities = [];
   }
 
   _onCameraMoveEnd() {
@@ -291,6 +323,7 @@ export class BathymetryEngine {
     if (spanDeg > MAX_VIEW_SPAN_DEG) {
       this._contourDataSource.entities.removeAll();
       this._markerDataSource.entities.removeAll();
+      this._clearDepthFlags();
       this._contourResultText = '';
       this._markerResultText = '';
       this._gridStatusText = `Zoom in for bathymetry data (view is ${spanDeg.toFixed(1)}° wide, need < ${MAX_VIEW_SPAN_DEG}°).`;
@@ -333,6 +366,12 @@ export class BathymetryEngine {
       ? CONTOUR_LEVELS.filter((lvl) => lvl > min && lvl < max)
       : [];
 
+    // One flag spot per level — the segment endpoint closest to the view's
+    // west edge (see data/contourFlags.js) — for every level actually drawn,
+    // not just the "major" (round-thousand) ones: at ocean scale even the
+    // finer bands (10/20/50/100/200/500 m) are worth calling out by number.
+    const flagSpotByLevel = new Map();
+
     this._contourDataSource.entities.removeAll();
     let segmentCount = 0;
     for (const level of levels) {
@@ -355,11 +394,25 @@ export class BathymetryEngine {
         });
         segmentCount += 1;
       }
+      const spot = westmostSegmentPoint(segments, rows, cols, west, south, east, north);
+      if (spot) flagSpotByLevel.set(level, spot);
     }
 
     this._contourResultText = segmentCount > 0
       ? `${segmentCount} isobath segment${segmentCount === 1 ? '' : 's'} · GEBCO`
       : 'No depth contours in this view (likely over land or a uniform depth band).';
+
+    if (this.state.depthFlagsEnabled) {
+      this._flagEntities = buildContourFlags({
+        viewer: this.viewer,
+        dataSource: this._flagDataSource,
+        spots: flagSpotByLevel,
+        formatValue: formatDepth,
+        color: CONTOUR_COLOR,
+      });
+    } else {
+      this._clearDepthFlags();
+    }
   }
 
   // ── depth markers (subsample of the same shared grid) ───────────────
@@ -406,8 +459,10 @@ export class BathymetryEngine {
   destroy() {
     this.viewer.camera.moveEnd.removeEventListener(this._onCameraMoveEnd);
     if (this._recomputeTimer) clearTimeout(this._recomputeTimer);
+    this._removeFlagAvoidance?.();
     this.viewer.dataSources.remove(this._contourDataSource, true);
     this.viewer.dataSources.remove(this._markerDataSource, true);
+    this.viewer.dataSources.remove(this._flagDataSource, true);
   }
 }
 

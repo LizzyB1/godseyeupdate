@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { marchingSquaresSegments, gridToLonLat } from './contourMath.js';
+import { marchingSquaresSegments, gridToLonLat, westmostSegmentPoint } from './contourMath.js';
 
 test('a flat grid produces no segments at any level away from its value', () => {
   const heights = [10, 10, 10, 10, 10, 10, 10, 10, 10]; // 3x3, all 10
@@ -57,4 +57,27 @@ test('gridToLonLat maps row 0 to the north edge and the last row to the south ed
   const center = gridToLonLat(1, 1, 3, 3, bounds.west, bounds.south, bounds.east, bounds.north);
   assert.equal(center.lon, 0);
   assert.equal(center.lat, 40);
+});
+
+test('westmostSegmentPoint returns null for an empty segment list', () => {
+  assert.equal(westmostSegmentPoint([], 3, 3, -10, 30, 10, 50), null);
+});
+
+test('westmostSegmentPoint picks the endpoint with the smallest longitude, across multiple segments', () => {
+  const bounds = { west: -10, south: 30, east: 10, north: 50 };
+  const segments = [
+    [{ x: 2, y: 0 }, { x: 2, y: 2 }], // both at grid-x=2 -> lon = -10 + (2/2)*20 = 10 (east edge)
+    [{ x: 0, y: 1 }, { x: 1, y: 1 }], // grid-x=0 -> lon=-10 (west edge); grid-x=1 -> lon=0
+  ];
+  const result = westmostSegmentPoint(segments, 3, 3, bounds.west, bounds.south, bounds.east, bounds.north);
+  assert.equal(result.lon, -10);
+  assert.equal(result.lat, 40); // grid-y=1 -> mid latitude
+});
+
+test('westmostSegmentPoint is stable when every endpoint shares the same longitude', () => {
+  const bounds = { west: -10, south: 30, east: 10, north: 50 };
+  const segments = [[{ x: 1, y: 0 }, { x: 1, y: 2 }]];
+  const result = westmostSegmentPoint(segments, 3, 3, bounds.west, bounds.south, bounds.east, bounds.north);
+  assert.equal(result.lon, 0);
+  assert.ok(result.lat === 50 || result.lat === 30);
 });

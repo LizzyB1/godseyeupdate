@@ -88,10 +88,19 @@ export class BathymetryBox {
     section.appendChild(markerRow);
     markerEnable.addEventListener('change', () => this.engine.setMarkersEnabled(markerEnable.checked));
 
+    const flagRow = el('label', 'mapovl-row');
+    const flagEnable = document.createElement('input');
+    flagEnable.type = 'checkbox';
+    flagEnable.checked = this.engine.state.depthFlagsEnabled;
+    flagRow.appendChild(flagEnable);
+    flagRow.appendChild(document.createTextNode('Show depth flags'));
+    section.appendChild(flagRow);
+    flagEnable.addEventListener('change', () => this.engine.setDepthFlagsEnabled(flagEnable.checked));
+
     section.appendChild(el(
       'div',
       'mapovl-hint',
-      'Isobaths and depth readouts: GEBCO grid via opentopodata.org (public, no key, rate-limited — cached once looked up).',
+      'Isobaths and depth readouts: GEBCO grid via opentopodata.org (public, no key, rate-limited — cached once looked up). Depth flags need "Show depth contours" on, and nudge clear of any control panel in the way.',
     ));
 
     body.appendChild(section);

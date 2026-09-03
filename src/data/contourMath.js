@@ -90,3 +90,30 @@ export function gridToLonLat(x, y, rows, cols, west, south, east, north) {
   const lat = north - (y / (rows - 1)) * (north - south);
   return { lon, lat };
 }
+
+/**
+ * Given one contour level's segments (as returned by
+ * `marchingSquaresSegments`, already converted through `gridToLonLat`'s
+ * coordinate space), find the segment endpoint closest to the sampled
+ * rectangle's west edge — i.e. whichever endpoint has the smallest
+ * longitude. Used to place a single per-level label/flag biased toward the
+ * left/west side of the current view instead of at the view's geographic
+ * center, so a returning viewer always finds a level's flag in the same
+ * relative spot (the west edge) rather than wherever the view happened to
+ * be centered.
+ *
+ * @param {Array<[{x:number,y:number}, {x:number,y:number}]>} segments - one level's segments, fractional grid coords.
+ * @param {number} rows @param {number} cols
+ * @param {number} west @param {number} south @param {number} east @param {number} north
+ * @returns {?{lon:number, lat:number}} null if `segments` is empty.
+ */
+export function westmostSegmentPoint(segments, rows, cols, west, south, east, north) {
+  let best = null;
+  for (const [a, b] of segments) {
+    for (const pt of [a, b]) {
+      const { lon, lat } = gridToLonLat(pt.x, pt.y, rows, cols, west, south, east, north);
+      if (!best || lon < best.lon) best = { lon, lat };
+    }
+  }
+  return best;
+}
