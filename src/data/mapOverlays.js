@@ -45,6 +45,17 @@ const RECOMPUTE_DEBOUNCE_MS = 550;
 const CONTOUR_GRID_COLS = 28;
 const CONTOUR_GRID_ROWS = 20;
 const MAX_CONTOUR_VIEW_SPAN_DEG = 1.5; // ~165km — above this, contours are too coarse to be meaningful
+// `camera.computeViewRectangle()` is an AXIS-ALIGNED bounding box around
+// four picked screen-corner points — for a nadir, unrotated camera that's
+// close to the true visible footprint, but for a tilted/rotated (oblique)
+// view the actual visible ground is a rotated, foreshortened quadrilateral
+// well inside that box. Sampling and drawing the whole box wastes real
+// work on geography that was never going to be on screen. Rather than
+// reshape the sampling grid itself (marching squares needs a plain
+// rectangular grid to stay correct), each drawn chain is screen-projected
+// after the fact and dropped if none of its points land anywhere near the
+// canvas — see `_anyPositionOnScreen`.
+const CONTOUR_SCREEN_MARGIN_PX = 40; // generous slack so a chain right at the true edge doesn't flicker in/out
 const MAX_CONTOUR_LEVELS = 60; // hard cap so pathological relief can't spawn thousands of polylines
 const MAX_GRID_LINES_PER_AXIS = 60;
 /** Valid `flagEdges`/edge-argument values, in the fixed order UI checkboxes present them. */
@@ -64,8 +75,45 @@ const RETRY_DELAY_MS = 800;
 const MAX_RECOMPUTE_RETRIES = 4;
 /** Cache store name (see data/apiCache.js) for reverse-geocode results — addresses for a given point essentially never change. */
 const GEOCODE_CACHE_STORE = 'geocode';
+/**
+ * Cache store name for the FINISHED contour map-visualization data — drawn
+ * line geometry, flag spots, and ring-label positions, not raw scene
+ * height samples (see `contourCacheKey` and `_recomputeContours` for the
+ * freshness/safety reasoning: a hit repaints instantly, but only a
+ * recent-enough hit skips the live recompute outright — an older one is
+ * shown as an instant preview while a live recompute still runs
+ * underneath and corrects it).
+ */
+const CONTOUR_GEOMETRY_CACHE_STORE = 'mapContourLines';
+/** Within this long a cached contour result is treated as authoritative and the live resample is skipped entirely; past it, a hit is still painted instantly but a live recompute still follows and overwrites it. */
+const CONTOUR_CACHE_FRESH_MS = 10 * 60 * 1000;
+/** View-rectangle rounding (decimal degrees) for the contour cache key — coarse enough that returning to roughly the same framing still hits (~111m), fine enough that two genuinely different views don't collide. */
+const CONTOUR_CACHE_PRECISION = 3;
 /** The only vertical-exaggeration multipliers the UI (and this engine) accept — see `setVerticalExaggeration`. */
 const EXAGGERATION_OPTIONS = [1, 1.5, 2];
+/** The only minimum-drawn-height cutoffs the UI (and this engine) accept — see `setContourMinHeightM`. */
+const MIN_HEIGHT_OPTIONS = [0, 100, 200];
+
+/**
+ * Cache key for the contour geometry cache: a coarsely-rounded view
+ * rectangle plus every piece of engine state that affects the FINISHED
+ * output (line geometry, flags, ring labels) — so a hit is only ever
+ * reused when it's valid for exactly what's currently configured.
+ */
+function contourCacheKey(west, south, east, north, state) {
+  const r = (n) => n.toFixed(CONTOUR_CACHE_PRECISION);
+  const edges = [...state.flagEdges].sort().join(',');
+  return [
+    r(west), r(south), r(east), r(north),
+    state.contourMajorSpacing,
+    state.contourMinorEnabled ? 1 : 0,
+    state.contourMinorSpacing,
+    state.contourSmoothing,
+    edges,
+    state.ringLabelsEnabled ? 1 : 0,
+    state.contourMinHeightM || 0,
+  ].join('|');
+}
 
 export const DEFAULT_STATE = Object.freeze({
   contoursEnabled: false,
@@ -76,6 +124,11 @@ export const DEFAULT_STATE = Object.freeze({
   // data/contourMath.js's smoothPolyline) — 0 is the raw marching-squares
   // line, higher numbers round it off more. This is the "precision" slider.
   contourSmoothing: 1,
+  // Minimum drawn contour height (meters) — 0 = no filter (draw every
+  // level), 100/200 hide every level below that so low-lying/coastal
+  // relief doesn't clutter the view when only the higher terrain matters.
+  // Only ever 0, 100, or 200 — see `setContourMinHeightM`'s snapping.
+  contourMinHeightM: 0,
   verticalExaggeration: 1,
   gridEnabled: false,
   gridSpacingDeg: 1,
@@ -154,6 +207,10 @@ export class MapOverlaysEngine {
     this._recomputeTimer = null;
     this._contourStatus = ''; // status line shown in the UI
     this._computeToken = 0;
+    // Shared durable cache — reverse-geocode results (see `_reverseGeocode`)
+    // and, now, the finished contour map-visualization data (see
+    // CONTOUR_GEOMETRY_CACHE_STORE / `_recomputeContours`).
+    this._cache = getSharedCache();
     /** How many sparse-height retries have fired for the in-flight recompute cycle — bounds it to MAX_RECOMPUTE_RETRIES, never a loop. */
     this._retryCountThisCycle = 0;
 
@@ -274,6 +331,28 @@ export class MapOverlaysEngine {
    */
   setContourSmoothing(level) {
     this.state.contourSmoothing = Cesium.Math.clamp(Math.round(Number(level)) || 0, 0, 4);
+    this._persist();
+    if (this.state.contoursEnabled) this._scheduleRecompute();
+  }
+
+  /**
+   * Minimum drawn contour height — hides every level below the cutoff so
+   * low-lying/coastal relief doesn't clutter the view when only the
+   * higher terrain matters. Only 0 (off)/100/200 are valid — snapped to
+   * the nearest option same as `setVerticalExaggeration`, so a stale
+   * restored value can never drift out of what the UI offers. Changes the
+   * actual set of drawn levels, so it needs a full recompute.
+   */
+  setContourMinHeightM(meters) {
+    const num = Number(meters);
+    const target = Number.isFinite(num) ? num : 0;
+    let snapped = MIN_HEIGHT_OPTIONS[0];
+    let bestDelta = Infinity;
+    for (const option of MIN_HEIGHT_OPTIONS) {
+      const delta = Math.abs(option - target);
+      if (delta < bestDelta) { bestDelta = delta; snapped = option; }
+    }
+    this.state.contourMinHeightM = snapped;
     this._persist();
     if (this.state.contoursEnabled) this._scheduleRecompute();
   }
@@ -472,7 +551,103 @@ export class MapOverlaysEngine {
     this._recomputeTimer = setTimeout(() => this._recomputeContours(), RECOMPUTE_DEBOUNCE_MS);
   }
 
-  async _recomputeContours() {
+  /**
+   * Manual "Refresh contours" button: an immediate, live recompute for the
+   * current view — skips the recompute debounce (a click should feel
+   * instant, not wait out the same delay a camera pan does) and passes
+   * `forceLive` through to `_recomputeContours` so it doesn't just repaint
+   * whatever's cached and call it done. A no-op while contours are off.
+   */
+  refreshContours() {
+    if (!this.state.contoursEnabled) return;
+    if (this._recomputeTimer) { clearTimeout(this._recomputeTimer); this._recomputeTimer = null; }
+    this._retryCountThisCycle = 0;
+    this._recomputeContours({ forceLive: true });
+  }
+
+  /**
+   * True if at least one of `positions` projects anywhere near the actual
+   * visible canvas — see `CONTOUR_SCREEN_MARGIN_PX`'s comment for why this
+   * exists on top of the view-rectangle sampling bounds. A projection
+   * failure (behind the camera, degenerate) counts as off-screen, not a
+   * false positive.
+   */
+  _anyPositionOnScreen(positions) {
+    const scene = this.viewer.scene;
+    const canvas = scene?.canvas;
+    if (!canvas) return true; // no canvas to check against (e.g. a test double) — don't cull blind
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    for (const pos of positions) {
+      const screen = Cesium.SceneTransforms.worldToWindowCoordinates(scene, pos);
+      if (
+        screen
+        && screen.x >= -CONTOUR_SCREEN_MARGIN_PX && screen.x <= width + CONTOUR_SCREEN_MARGIN_PX
+        && screen.y >= -CONTOUR_SCREEN_MARGIN_PX && screen.y <= height + CONTOUR_SCREEN_MARGIN_PX
+      ) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Rebuild a `Cesium.PolylineCollection` plus the flag/ring-label Maps
+   * straight from a cached payload (see `CONTOUR_GEOMETRY_CACHE_STORE`) —
+   * no scene-height sampling, no marching squares, no stitching/smoothing:
+   * every point in `payload.lines` is already the final drawn shape.
+   */
+  _renderCachedContours(payload, token) {
+    const levelPaletteIndex = new Map(payload.levelPaletteIndex);
+    const newPrimitive = new Cesium.PolylineCollection();
+    for (const line of payload.lines) {
+      const color = Cesium.Color
+        .fromCssColorString(paletteColorHex(LAND_CONTOUR_PALETTE, levelPaletteIndex.get(line.height) ?? 0))
+        .withAlpha(line.isMajor ? 0.85 : 0.35);
+      const positions = line.positions.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat, line.height));
+      newPrimitive.add({ positions, width: line.isMajor ? 2 : 1, material: Cesium.Material.fromType('Color', { color }) });
+    }
+    this._finishContourRender({
+      token,
+      newPrimitive,
+      segmentCount: payload.segmentCount,
+      levelCount: payload.levelCount,
+      minH: payload.minH,
+      maxH: payload.maxH,
+      flagSpotByLevel: new Map(payload.flagSpotByLevel),
+      levelPaletteIndex,
+      rings: payload.rings,
+    });
+  }
+
+  /**
+   * Shared tail for both a live compute and a cache-hit repaint: swap in
+   * the new primitive (or drop it if there was nothing to draw), set the
+   * status line, and (re)apply flags/ring labels. Bails without touching
+   * anything currently on screen if `token` was superseded while this
+   * result was being built/read.
+   */
+  _finishContourRender({ token, newPrimitive, segmentCount, levelCount, minH, maxH, flagSpotByLevel, levelPaletteIndex, rings }) {
+    if (token !== this._computeToken) { newPrimitive.destroy(); return; }
+    this._clearContours();
+    if (segmentCount > 0) {
+      this._contourPrimitive = this.viewer.scene.primitives.add(newPrimitive);
+      this._setStatus(`${levelCount} level${levelCount === 1 ? '' : 's'}, ${segmentCount} segments (${Math.round(minH)}–${Math.round(maxH)} m relief).`);
+    } else {
+      newPrimitive.destroy();
+      this._setStatus(`Flat here — ${Math.round(minH)}–${Math.round(maxH)} m relief, no contour crossing.`);
+    }
+    this._applyContourFlags(flagSpotByLevel, levelPaletteIndex);
+    this._applyRingLabels(rings);
+  }
+
+  /**
+   * @param {Object} [opts]
+   * @param {boolean} [opts.forceLive=false] - Skip the cache-freshness
+   *   fast path and always run a real resample, even if a recent cache
+   *   entry exists for this exact view+settings. Set by the manual
+   *   "Refresh contours" button (`refreshContours`) — the whole point of
+   *   asking for a refresh is to not trust whatever's cached.
+   */
+  async _recomputeContours({ forceLive = false } = {}) {
     if (!this.state.contoursEnabled) return;
     const token = ++this._computeToken;
     const rect = this.viewer.camera.computeViewRectangle();
@@ -489,6 +664,25 @@ export class MapOverlaysEngine {
     const south = Cesium.Math.toDegrees(rect.south);
     const east = Cesium.Math.toDegrees(rect.east);
     const north = Cesium.Math.toDegrees(rect.north);
+
+    // Durable cache of the FINISHED map-visualization data — see
+    // CONTOUR_GEOMETRY_CACHE_STORE's comment. A hit repaints instantly; a
+    // RECENT hit is treated as authoritative and skips the live resample
+    // below entirely, an OLDER one is shown as an instant preview while
+    // the live resample still runs underneath and overwrites both the
+    // screen and this cache entry once it finishes — so a hit is never a
+    // permanently-stale substitute for the live result, only ever a
+    // faster repaint of it. `forceLive` (the manual refresh button) skips
+    // straight past this: still paints the cached shape instantly so
+    // there's no blank flash, but always keeps going into a real resample
+    // regardless of how fresh the cache entry is.
+    const cacheKey = contourCacheKey(west, south, east, north, this.state);
+    const cached = await this._cache.get(CONTOUR_GEOMETRY_CACHE_STORE, cacheKey);
+    if (token !== this._computeToken) return; // superseded while the cache read was in flight
+    if (cached) {
+      this._renderCachedContours(cached, token);
+      if (!forceLive && Date.now() - (cached.cachedAt || 0) < CONTOUR_CACHE_FRESH_MS) return;
+    }
 
     const rows = CONTOUR_GRID_ROWS;
     const cols = CONTOUR_GRID_COLS;
@@ -516,7 +710,7 @@ export class MapOverlaysEngine {
       // but disappear" was.
       this._retryCountThisCycle += 1;
       this._setStatus('Sampling scene heights… (waiting for tiles to finish loading)');
-      setTimeout(() => { if (token === this._computeToken) this._recomputeContours(); }, RETRY_DELAY_MS);
+      setTimeout(() => { if (token === this._computeToken) this._recomputeContours({ forceLive }); }, RETRY_DELAY_MS);
       return;
     }
     if (!finite.length) {
@@ -542,12 +736,21 @@ export class MapOverlaysEngine {
       }
     }
 
+    // Minimum-height cutoff (see `setContourMinHeightM`): drop every level
+    // below it BEFORE anything downstream (palette index, drawing, flags,
+    // ring labels, the cache payload, the status line's level count) so a
+    // hidden level costs nothing beyond the arithmetic above that found
+    // it — `minH`/`maxH` themselves stay the true sampled relief range,
+    // only which levels actually get drawn changes.
+    const minHeightFilter = this.state.contourMinHeightM || 0;
+    const drawnLevels = minHeightFilter > 0 ? levels.filter((lvl) => lvl.height >= minHeightFilter) : levels;
+
     // Sorted by height (not push order — majors and minors are pushed in
     // two separate passes above) so that a level's index reflects its
     // actual neighbors on screen: consecutive palette colors then land on
     // lines that are genuinely next to each other, giving real
     // "contrast between neighbours" rather than an arbitrary one.
-    const sortedLevels = [...levels].sort((a, b) => a.height - b.height);
+    const sortedLevels = [...drawnLevels].sort((a, b) => a.height - b.height);
     const levelPaletteIndex = new Map(sortedLevels.map((lvl, i) => [lvl.height, i]));
     const colorForLevel = (height) => Cesium.Color.fromCssColorString(paletteColorHex(LAND_CONTOUR_PALETTE, levelPaletteIndex.get(height) ?? 0));
 
@@ -564,6 +767,12 @@ export class MapOverlaysEngine {
     // the same height (e.g. two separate hills) each get their own entry.
     const rings = [];
     const smoothing = this.state.contourSmoothing;
+
+    // Mirror of `newPrimitive`'s lines as plain, JSON-serializable data
+    // (lon/lat pairs, not Cartesian3) — this is exactly what gets written
+    // to CONTOUR_GEOMETRY_CACHE_STORE below, and exactly what
+    // `_renderCachedContours` rebuilds a primitive from on a hit.
+    const linesForCache = [];
 
     const newPrimitive = new Cesium.PolylineCollection();
     let segmentCount = 0;
@@ -591,15 +800,19 @@ export class MapOverlaysEngine {
           drawPts = smoothPolyline(chain.points, smoothing, false);
         }
         if (drawPts.length < 2) continue;
-        const positions = drawPts.map((pt) => {
-          const ll = gridToLonLat(pt.x, pt.y, rows, cols, west, south, east, north);
-          return Cesium.Cartesian3.fromDegrees(ll.lon, ll.lat, height);
-        });
+        const llPoints = drawPts.map((pt) => gridToLonLat(pt.x, pt.y, rows, cols, west, south, east, north));
+        const positions = llPoints.map((ll) => Cesium.Cartesian3.fromDegrees(ll.lon, ll.lat, height));
+        // Inside the sampled view RECTANGLE doesn't mean inside what's
+        // actually on screen for a tilted/rotated camera — see
+        // CONTOUR_SCREEN_MARGIN_PX's comment. Drop it here rather than
+        // spend a primitive (and cache bytes) on a line nobody sees.
+        if (!this._anyPositionOnScreen(positions)) continue;
         newPrimitive.add({
           positions,
           width: isMajor ? 2 : 1,
           material: Cesium.Material.fromType('Color', { color: lineColor }),
         });
+        linesForCache.push({ height, isMajor, positions: llPoints.map((ll) => [ll.lon, ll.lat]) });
 
         if (isMajor && chain.closed && this.state.ringLabelsEnabled) {
           // Northmost point of the RAW (unsmoothed) ring — cheap, stable,
@@ -622,18 +835,33 @@ export class MapOverlaysEngine {
       }
     }
 
-    if (token !== this._computeToken) { newPrimitive.destroy(); return; }
-    this._clearContours();
-    if (segmentCount > 0) {
-      this._contourPrimitive = this.viewer.scene.primitives.add(newPrimitive);
-      this._setStatus(`${levels.length} level${levels.length === 1 ? '' : 's'}, ${segmentCount} segments (${Math.round(minH)}–${Math.round(maxH)} m relief).`);
-    } else {
-      newPrimitive.destroy();
-      this._setStatus(`Flat here — ${Math.round(minH)}–${Math.round(maxH)} m relief, no contour crossing.`);
-    }
+    // Cache the finished result before rendering it — a live compute that
+    // gets superseded mid-flight still leaves a valid entry behind for the
+    // NEXT visit to this same view+settings, even though `_finishContourRender`
+    // below will decline to touch the screen for it.
+    this._cache.put(CONTOUR_GEOMETRY_CACHE_STORE, cacheKey, {
+      minH,
+      maxH,
+      levelCount: drawnLevels.length,
+      segmentCount,
+      lines: linesForCache,
+      flagSpotByLevel: [...flagSpotByLevel.entries()],
+      levelPaletteIndex: [...levelPaletteIndex.entries()],
+      rings,
+      cachedAt: Date.now(),
+    });
 
-    this._applyContourFlags(flagSpotByLevel, levelPaletteIndex);
-    this._applyRingLabels(rings);
+    this._finishContourRender({
+      token,
+      newPrimitive,
+      segmentCount,
+      levelCount: drawnLevels.length,
+      minH,
+      maxH,
+      flagSpotByLevel,
+      levelPaletteIndex,
+      rings,
+    });
   }
 
   // ── lat/lon grid ─────────────────────────────────────────────────────

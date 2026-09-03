@@ -10422,7 +10422,81 @@ body.scene-playback-mode #first-run-launcher {
   font: 500 13px/1.3 var(--font-sans);
   color: var(--text-primary);
 }
-.mapovl-row input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+/* Custom checkbox: bigger and more obvious than the browser default, a
+   solid accent-colored box with a BLACK checkmark when checked (for
+   contrast against the bright fill — a white/default tick washed out
+   there), and an explicit "✕" instead of a blank box when unchecked, so
+   "off" reads as a deliberate state rather than an unfinished control. */
+.mapovl-row input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--glass-border);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.mapovl-row input[type="checkbox"]:hover { border-color: var(--accent); }
+.mapovl-row input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.mapovl-row input[type="checkbox"]::after {
+  content: '\2715';
+  font: 700 12px/1 var(--font-sans);
+  color: var(--text-dim);
+}
+.mapovl-row input[type="checkbox"]:checked::after {
+  content: '\2713';
+  font: 900 14px/1 var(--font-sans);
+  color: #000000;
+}
+
+/* Stacked (label-above) row for a slider + its own min/interim/max scale
+   directly underneath — as opposed to `.mapovl-row`'s inline label+control
+   layout, used for checkboxes/selects/color pickers. The slider needs the
+   row's FULL width to itself so the scale's evenly-spaced labels actually
+   line up with the (linear) track under them — see mapOverlayControls.js's
+   `sliderScale` comment. */
+.mapovl-slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mapovl-slider-row-label {
+  font: 500 13px/1.3 var(--font-sans);
+  color: var(--text-primary);
+}
+.mapovl-slider-row input[type="range"] { width: 100%; }
+.mapovl-slider-scale {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 2px;
+  margin-top: -3px;
+}
+.mapovl-slider-scale-tick {
+  position: relative;
+  font: 500 9px/1.2 var(--font-mono);
+  color: var(--text-dim);
+}
+.mapovl-refresh-contours-btn { width: 100%; }
+.mapovl-slider-scale-tick::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1px;
+  height: 3px;
+  background: var(--glass-border);
+}
 .mapovl-select {
   margin-left: auto;
   background: rgba(0, 0, 0, 0.6);

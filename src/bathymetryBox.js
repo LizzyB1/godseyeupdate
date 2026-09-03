@@ -23,6 +23,18 @@ function el(tag, className, html) {
   return node;
 }
 
+/**
+ * A small min/interim/max scale rendered under a `type="range"` slider —
+ * see `mapOverlayControls.js`'s identical helper for why plain evenly-
+ * spaced labels (no JS pixel-sync to the thumb) are enough here.
+ * @param {string[]} labels - Evenly-spaced values from min to max, as display text.
+ */
+function sliderScale(labels) {
+  const row = el('div', 'mapovl-slider-scale');
+  for (const label of labels) row.appendChild(el('span', 'mapovl-slider-scale-tick', label));
+  return row;
+}
+
 export class BathymetryBox {
   constructor(engine) {
     this.engine = engine;
@@ -101,8 +113,8 @@ export class BathymetryBox {
     section.appendChild(flagStepRow);
     flagStepSelect.addEventListener('change', () => this.engine.setFlagLabelStep(Number(flagStepSelect.value)));
 
-    const flagSizeRow = el('label', 'mapovl-row');
-    flagSizeRow.appendChild(document.createTextNode('Text size'));
+    const flagSizeRow = el('div', 'mapovl-slider-row');
+    flagSizeRow.appendChild(el('div', 'mapovl-slider-row-label', 'Text size'));
     const flagSizeInput = document.createElement('input');
     flagSizeInput.type = 'range';
     flagSizeInput.min = '12';
@@ -110,6 +122,7 @@ export class BathymetryBox {
     flagSizeInput.step = '1';
     flagSizeInput.value = String(this.engine.state.flagFontSize);
     flagSizeRow.appendChild(flagSizeInput);
+    flagSizeRow.appendChild(sliderScale(['12', '21', '30', '39', '48']));
     section.appendChild(flagSizeRow);
     flagSizeInput.addEventListener('input', () => this.engine.setFlagFontSize(Number(flagSizeInput.value)));
 
@@ -123,8 +136,8 @@ export class BathymetryBox {
     section.appendChild(flagBgColorRow);
     flagBgColorInput.addEventListener('input', () => this.engine.setFlagBgColor(flagBgColorInput.value));
 
-    const flagBgAlphaRow = el('label', 'mapovl-row');
-    flagBgAlphaRow.appendChild(document.createTextNode('Background transparency'));
+    const flagBgAlphaRow = el('div', 'mapovl-slider-row');
+    flagBgAlphaRow.appendChild(el('div', 'mapovl-slider-row-label', 'Background transparency'));
     const flagBgAlphaInput = document.createElement('input');
     flagBgAlphaInput.type = 'range';
     flagBgAlphaInput.min = '0';
@@ -132,6 +145,7 @@ export class BathymetryBox {
     flagBgAlphaInput.step = '0.05';
     flagBgAlphaInput.value = String(this.engine.state.flagBgAlpha);
     flagBgAlphaRow.appendChild(flagBgAlphaInput);
+    flagBgAlphaRow.appendChild(sliderScale(['0', '0.25', '0.5', '0.75', '1']));
     section.appendChild(flagBgAlphaRow);
     flagBgAlphaInput.addEventListener('input', () => this.engine.setFlagBgAlpha(Number(flagBgAlphaInput.value)));
 

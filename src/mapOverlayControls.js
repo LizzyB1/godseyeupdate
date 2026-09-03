@@ -41,6 +41,22 @@ function el(tag, className, html) {
   return node;
 }
 
+/**
+ * A small min/interim/max scale rendered under a `type="range"` slider —
+ * plain evenly-spaced labels with a tick mark above each, not
+ * pixel-synced to the actual thumb position via JS. That's fine here:
+ * every slider this is used with has its labeled values evenly spaced
+ * across its own min-max range, and a native range input's track is
+ * linear, so each label already lines up with its value's real position
+ * on the track for free.
+ * @param {string[]} labels - Evenly-spaced values from min to max, as display text.
+ */
+function sliderScale(labels) {
+  const row = el('div', 'mapovl-slider-scale');
+  for (const label of labels) row.appendChild(el('span', 'mapovl-slider-scale-tick', label));
+  return row;
+}
+
 export class MapOverlayControls {
   constructor(engine) {
     this.engine = engine;
@@ -112,8 +128,12 @@ export class MapOverlayControls {
     minorRow.appendChild(document.createTextNode('+ minor contours every 10 m'));
     contourSection.appendChild(minorRow);
 
-    const precisionRow = el('label', 'mapovl-row');
-    precisionRow.appendChild(document.createTextNode('Line smoothing'));
+    // A stacked (label-above) row, not the inline label+control rows used
+    // elsewhere in this box: the slider needs its full row width to itself
+    // so the min/interim/max scale directly under it lines up with the
+    // track (see sliderScale's own comment).
+    const precisionRow = el('div', 'mapovl-slider-row');
+    precisionRow.appendChild(el('div', 'mapovl-slider-row-label', 'Line smoothing'));
     const precisionInput = document.createElement('input');
     precisionInput.type = 'range';
     precisionInput.min = '0';
@@ -122,8 +142,39 @@ export class MapOverlayControls {
     precisionInput.value = String(this.engine.state.contourSmoothing);
     precisionInput.title = '0 = raw line, higher = smoother/more precise';
     precisionRow.appendChild(precisionInput);
+    precisionRow.appendChild(sliderScale(['0', '1', '2', '3', '4']));
     contourSection.appendChild(precisionRow);
     precisionInput.addEventListener('change', () => this.engine.setContourSmoothing(Number(precisionInput.value)));
+
+    // Minimum-height cutoff — same fixed button-group pattern as height
+    // relief exaggeration below: hides every level below the pick, so
+    // low-lying/coastal relief doesn't clutter the view when only the
+    // higher terrain matters.
+    const minHeightRow = el('div', 'mapovl-row');
+    minHeightRow.appendChild(document.createTextNode('Hide contours below'));
+    const minHeightButtons = [];
+    const markActiveMinHeight = (v) => {
+      for (const btn of minHeightButtons) btn.classList.toggle('is-active', Number(btn.dataset.value) === v);
+    };
+    for (const { label, value } of [
+      { label: 'Off', value: 0 },
+      { label: '100m', value: 100 },
+      { label: '200m', value: 200 },
+    ]) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mapovl-btn';
+      btn.dataset.value = String(value);
+      btn.textContent = label;
+      btn.addEventListener('click', () => {
+        this.engine.setContourMinHeightM(value);
+        markActiveMinHeight(this.engine.state.contourMinHeightM);
+      });
+      minHeightButtons.push(btn);
+      minHeightRow.appendChild(btn);
+    }
+    markActiveMinHeight(this.engine.state.contourMinHeightM);
+    contourSection.appendChild(minHeightRow);
 
     const ringLabelsRow = el('label', 'mapovl-row');
     const ringLabelsEnable = document.createElement('input');
@@ -133,6 +184,19 @@ export class MapOverlayControls {
     ringLabelsRow.appendChild(document.createTextNode('Label closed contour rings'));
     contourSection.appendChild(ringLabelsRow);
     ringLabelsEnable.addEventListener('change', () => this.engine.setRingLabelsEnabled(ringLabelsEnable.checked));
+
+    // Manual refresh: forces an immediate, live recompute — bypasses both
+    // the pan debounce and the contour-geometry cache's freshness fast
+    // path (data/mapOverlays.js's `refreshContours`), for whenever a
+    // repaint from cache or the last live sample doesn't look right and a
+    // recompute from scratch is wanted right now, not on the next pan.
+    const refreshBtn = document.createElement('button');
+    refreshBtn.type = 'button';
+    refreshBtn.className = 'mapovl-btn mapovl-refresh-contours-btn';
+    refreshBtn.textContent = '⟳ Refresh contours';
+    refreshBtn.title = 'Recompute contours for the current view right now, ignoring any cached result';
+    refreshBtn.addEventListener('click', () => this.engine.refreshContours());
+    contourSection.appendChild(refreshBtn);
 
     const contourStatus = el('div', 'mapovl-status', '');
     contourSection.appendChild(contourStatus);
@@ -278,8 +342,8 @@ export class MapOverlayControls {
     flagSection.appendChild(flagStepRow);
     flagStepSelect.addEventListener('change', () => this.engine.setFlagLabelStep(Number(flagStepSelect.value)));
 
-    const flagSizeRow = el('label', 'mapovl-row');
-    flagSizeRow.appendChild(document.createTextNode('Text size'));
+    const flagSizeRow = el('div', 'mapovl-slider-row');
+    flagSizeRow.appendChild(el('div', 'mapovl-slider-row-label', 'Text size'));
     const flagSizeInput = document.createElement('input');
     flagSizeInput.type = 'range';
     flagSizeInput.min = '12';
@@ -287,6 +351,7 @@ export class MapOverlayControls {
     flagSizeInput.step = '1';
     flagSizeInput.value = String(this.engine.state.flagFontSize);
     flagSizeRow.appendChild(flagSizeInput);
+    flagSizeRow.appendChild(sliderScale(['12', '21', '30', '39', '48']));
     flagSection.appendChild(flagSizeRow);
     flagSizeInput.addEventListener('input', () => this.engine.setFlagFontSize(Number(flagSizeInput.value)));
 
@@ -341,6 +406,7 @@ export class MapOverlayControls {
       intervalSelect.value = String(this.engine.state.contourMajorSpacing);
       minorEnable.checked = false;
       precisionInput.value = String(this.engine.state.contourSmoothing);
+      markActiveMinHeight(this.engine.state.contourMinHeightM);
       ringLabelsEnable.checked = this.engine.state.ringLabelsEnabled;
       chartDatumEnable.checked = this.engine.state.chartDatumEnabled;
       markActiveExaggeration(this.engine.state.verticalExaggeration);

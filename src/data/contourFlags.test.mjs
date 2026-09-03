@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { thinSpotsByStep } from './contourFlags.js';
+import { thinSpotsByStep, computeCenterBiasOffset } from './contourFlags.js';
 
 test('thinSpotsByStep with step 1 returns every spot, unchanged', () => {
   const spots = new Map([[10, { lon: 1, lat: 1 }], [20, { lon: 2, lat: 2 }], [30, { lon: 3, lat: 3 }]]);
@@ -32,3 +32,29 @@ test('thinSpotsByStep treats a non-finite or sub-1 step as 1 (no thinning)', () 
 // scene/viewer respectively, neither of which this DOM-free Node test
 // environment provides — see hudAltitudeDatum.test.mjs for how a live
 // Cesium/DOM test is done when it's actually worth the setup cost.
+// computeCenterBiasOffset is plain arithmetic, so it's covered directly.
+
+test('computeCenterBiasOffset returns no nudge for a point already in the central 3/4', () => {
+  // 1000x800 canvas: central band is x in [125, 875], y in [100, 700].
+  assert.deepEqual(computeCenterBiasOffset(500, 400, 1000, 800), { x: 0, y: 0 });
+  assert.deepEqual(computeCenterBiasOffset(125, 100, 1000, 800), { x: 0, y: 0 });
+  assert.deepEqual(computeCenterBiasOffset(875, 700, 1000, 800), { x: 0, y: 0 });
+});
+
+test('computeCenterBiasOffset nudges a point in the left/top margin inward', () => {
+  const result = computeCenterBiasOffset(50, 30, 1000, 800);
+  assert.equal(result.x, 75); // 125 - 50
+  assert.equal(result.y, 70); // 100 - 30
+});
+
+test('computeCenterBiasOffset nudges a point in the right/bottom margin inward', () => {
+  const result = computeCenterBiasOffset(950, 770, 1000, 800);
+  assert.equal(result.x, -75); // 875 - 950
+  assert.equal(result.y, -70); // 700 - 770
+});
+
+test('computeCenterBiasOffset nudges only the axis that is out of band', () => {
+  const result = computeCenterBiasOffset(50, 400, 1000, 800);
+  assert.equal(result.x, 75);
+  assert.equal(result.y, 0);
+});

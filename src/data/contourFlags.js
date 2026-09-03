@@ -74,7 +74,7 @@ export const DEFAULT_RING_LABEL_FONT_SIZE = 13;
 export const DEFAULT_FLAG_BG_ALPHA = 0.92;
 
 /** Every mini-box / hideable-panel root id known to the app — the full set `installFlagAvoidance` checks flags against. Sourced from `panelVisibility.js`'s registry (the hideable panels) plus every `buildMiniBox` instance (not all of which are hideable), so a flag is nudged clear of ANY visible control box, not just the ones with a "×" hide button. */
-const MINIBOX_PANEL_IDS = ['restoretray-pad', 'mapovl-pad', 'coordbox-pad', 'hudread-pad', 'bathy-pad', 'camctl-pad', 'gpstrack-pad', 'about-pad', 'statusbox-pad'];
+const MINIBOX_PANEL_IDS = ['restoretray-pad', 'mapovl-pad', 'coordbox-pad', 'hudread-pad', 'bathy-pad', 'camctl-pad', 'gpstrack-pad', 'about-pad', 'statusbox-pad', 'summarybox-pad', 'cachectl-pad'];
 const AVOIDANCE_PANEL_IDS = [...new Set([...Object.keys(PANEL_LABELS), ...MINIBOX_PANEL_IDS])];
 
 /** Shared drop-shadow label look: heavy black outline behind solid white fill, no background plaque. `weight` is the outline width in px — flags use a heavier one than the smaller ring labels so the shadow stays proportional to the text. */
@@ -236,11 +236,41 @@ export function computePanelAvoidanceOffset(screenX, screenY) {
   return { x: shiftRight, y: 0 };
 }
 
+/** Fraction of the canvas, centered on it, that flag/ring labels are biased to stay within — see `computeCenterBiasOffset`. 0.75 means a 12.5%-wide margin is kept clear on every side. */
+const CENTER_BIAS_FRACTION = 0.75;
+
+/**
+ * Given a flag's screen position (after any panel-avoidance shift already
+ * applied) and the current canvas size, return the extra pixel offset
+ * needed to pull it back inside the central `CENTER_BIAS_FRACTION` of the
+ * canvas — `{x: 0, y: 0}` if it's already inside that central band. Like
+ * `computePanelAvoidanceOffset`, this only ever feeds into the label's
+ * `pixelOffset`, never the world anchor: panning the true contour spot back
+ * into the central band snaps the label right back to it, and a contour
+ * that's mostly off-screen just keeps its label pinned to the nearest edge
+ * of the band rather than being hidden.
+ * @param {number} screenX @param {number} screenY
+ * @param {number} width @param {number} height
+ * @returns {{x:number, y:number}}
+ */
+export function computeCenterBiasOffset(screenX, screenY, width, height) {
+  const marginX = (width * (1 - CENTER_BIAS_FRACTION)) / 2;
+  const marginY = (height * (1 - CENTER_BIAS_FRACTION)) / 2;
+  let x = 0;
+  let y = 0;
+  if (screenX < marginX) x = marginX - screenX;
+  else if (screenX > width - marginX) x = (width - marginX) - screenX;
+  if (screenY < marginY) y = marginY - screenY;
+  else if (screenY > height - marginY) y = (height - marginY) - screenY;
+  return { x, y };
+}
+
 /**
  * Install a `scene.postRender` listener that keeps every entity returned by
- * `getEntities()` clear of the app's currently-visible panels, by adjusting
- * each entity's `label.pixelOffset` in place every frame. Cheap and
- * idempotent per call; returns a remover.
+ * `getEntities()` clear of the app's currently-visible panels AND biased
+ * toward the central 3/4 of the screen, by adjusting each entity's
+ * `label.pixelOffset` in place every frame. Cheap and idempotent per call;
+ * returns a remover.
  * @param {Cesium.Viewer} viewer
  * @param {() => Array<Cesium.Entity>} getEntities - called fresh each frame, so a rebuilt flag set is picked up automatically.
  * @returns {() => void} call to uninstall.
@@ -251,17 +281,26 @@ export function installFlagAvoidance(viewer, getEntities) {
     const entities = getEntities();
     if (!entities || !entities.length) return;
     Cesium.JulianDate.now(now);
+    const canvas = viewer.scene.canvas;
+    const width = canvas?.clientWidth || 0;
+    const height = canvas?.clientHeight || 0;
     for (const entity of entities) {
       if (!entity.label || entity.isDestroyed?.()) continue;
       const pos = entity.position?.getValue(now);
       if (!pos) continue;
       const screen = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, pos);
       if (!screen) continue;
-      const avoid = computePanelAvoidanceOffset(screen.x, screen.y);
+      const avoidPanel = computePanelAvoidanceOffset(screen.x, screen.y);
+      // Center-bias runs against the post-panel-avoidance position, since
+      // that's where the label would actually land — no point pulling
+      // toward center from a spot it's about to be shifted away from.
+      const avoidCenter = (width > 0 && height > 0)
+        ? computeCenterBiasOffset(screen.x + avoidPanel.x, screen.y + avoidPanel.y, width, height)
+        : { x: 0, y: 0 };
       const base = entity._gevBaseOffset || BASE_LABEL_OFFSET;
       entity.label.pixelOffset = new Cesium.Cartesian2(
-        base.x + avoid.x,
-        base.y + avoid.y,
+        base.x + avoidPanel.x + avoidCenter.x,
+        base.y + avoidPanel.y + avoidCenter.y,
       );
     }
   };
