@@ -2332,6 +2332,89 @@ function terrainHeightsProxy() {
 }
 
 /**
+ * Open Topo Data (GEBCO2020) bathymetry depth-grid proxy for
+ * `src/data/bathymetry.js` — a thin same-origin passthrough to
+ * `https://api.opentopodata.org/v1/gebco2020`.
+ *
+ * This exists because the public api.opentopodata.org instance does not
+ * send CORS headers (no `Access-Control-Allow-Origin`; a known, still-open
+ * gap — see https://github.com/ajnisbet/opentopodata/issues/53), which was
+ * confirmed directly: a `fetch()` to it from a page on a different origin
+ * fails with `TypeError: Failed to fetch` in the browser, every time,
+ * regardless of how the request is shaped — CORS is enforced by the
+ * browser against the *response*, so no amount of client-side retrying or
+ * request reshaping gets around it. Calling it straight from
+ * `src/data/bathymetry.js` (as an earlier version of this module did) can
+ * therefore never work. A plain server-to-server request, however, is not
+ * subject to CORS at all — CORS is a browser-only mechanism — so this
+ * proxy simply forwards the query and relays the response back same-origin.
+ *
+ * No disk cache here: `src/data/apiCache.js` already caches every
+ * lon/lat depth lookup durably client-side (IndexedDB, shared across every
+ * tab of this app's own origin), so a second cache layer in this process
+ * would just be dead weight. This proxy's only extra job is a sequential,
+ * single-flight request queue that keeps this process under Open Topo
+ * Data's free-tier ceiling (1 request/second) even if multiple tabs or a
+ * burst of camera moves line up faster than the client-side throttle in
+ * `bathymetry.js` alone would guarantee.
+ */
+function bathymetryProxy() {
+  const UPSTREAM_URL = 'https://api.opentopodata.org/v1/gebco2020';
+  const MAX_LOCATIONS = 100; // matches Open Topo Data's own per-request cap
+  const MIN_INTERVAL_MS = 1100; // stay under the free tier's 1 req/s ceiling
+  let lastFetchAt = 0;
+  let queue = Promise.resolve();
+
+  function install(middlewares) {
+    middlewares.use('/api/bathymetry', async (req, res) => {
+      const send = (status, bodyText) => {
+        if (res.headersSent) return;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(bodyText);
+      };
+      try {
+        const parsedUrl = new URL(req.url || '', 'http://internal');
+        const locations = parsedUrl.searchParams.get('locations');
+        const count = locations ? locations.split('|').filter(Boolean).length : 0;
+        if (count === 0 || count > MAX_LOCATIONS) {
+          send(400, JSON.stringify({ error: `"locations" must be 1-${MAX_LOCATIONS} pipe-separated "lat,lon" points` }));
+          return;
+        }
+
+        // Sequential queue: every request — from any tab — waits its turn
+        // and the shared cooldown, so this process alone never exceeds the
+        // upstream free-tier rate limit no matter how many callers there are.
+        const turn = queue.then(async () => {
+          const waitMs = Math.max(0, MIN_INTERVAL_MS - (Date.now() - lastFetchAt));
+          if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+          lastFetchAt = Date.now();
+          const upstreamRes = await fetch(`${UPSTREAM_URL}?locations=${encodeURIComponent(locations)}`, {
+            signal: AbortSignal.timeout(15000),
+          });
+          const text = await upstreamRes.text();
+          return { status: upstreamRes.ok ? 200 : upstreamRes.status, text };
+        });
+        queue = turn.catch(() => {}); // keep the chain alive past individual failures
+        const { status, text } = await turn;
+        send(status, text);
+      } catch (err) {
+        send(502, JSON.stringify({ error: `bathymetry proxy error: ${err?.message || err}` }));
+      }
+    });
+  }
+
+  return {
+    name: 'bathymetry-proxy',
+    configureServer(server) {
+      install(server.middlewares);
+    },
+    configurePreviewServer(server) {
+      install(server.middlewares);
+    },
+  };
+}
+
+/**
  * adsbdb.com enrichment proxy: callsign → route (airline + origin/destination
  * airports) and hex → aircraft type/registration. Free community API — cached
  * aggressively: ONE upstream request per new key ever (404s negative-cached),
@@ -7480,6 +7563,7 @@ export default defineConfig(({ mode }) => {
       firmsProxy(),
       rocketLaunchesProxy(),
       terrainHeightsProxy(),
+      bathymetryProxy(),
       adsbdbProxy(),
       overpassProxy(),
       militaryInstallationsProxy(),

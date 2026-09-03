@@ -19,6 +19,16 @@ import { marchingSquaresSegments, gridToLonLat } from './contourMath.js';
  * regardless of whether one or both toggles are on, since contours and
  * markers now share a single fetched grid.
  *
+ * This module calls it through the same-origin `/api/bathymetry` proxy
+ * (`vite.config.js`'s `bathymetryProxy`), NOT directly — the public
+ * api.opentopodata.org instance sends no CORS headers, so a browser-side
+ * `fetch()` straight to it fails every time with `TypeError: Failed to
+ * fetch`, confirmed with a live cross-origin fetch (see
+ * https://github.com/ajnisbet/opentopodata/issues/53). The proxy is a
+ * plain server-to-server forward — not subject to CORS — that relays the
+ * exact same query/response shape, so this module only had to change its
+ * base URL.
+ *
  * Depth contours are computed locally from that sampled grid with the same
  * marching-squares logic (`data/contourMath.js`) the land-elevation contour
  * system in `data/mapOverlays.js` already uses and this project's test
@@ -63,9 +73,12 @@ const CONTOUR_LEVELS = [-10, -20, -50, -100, -200, -500, -1000, -1500, -2000, -3
 
 const GRID_CACHE_STORE = 'bathyDepth';
 const GRID_CACHE_PRECISION = 2; // decimal degrees (~1.1km) — cache key rounding.
-const OPENTOPODATA_URL = 'https://api.opentopodata.org/v1/gebco2020';
+// Same-origin proxy (see vite.config.js's bathymetryProxy) — NOT
+// api.opentopodata.org directly, which sends no CORS headers and always
+// fails a browser-side fetch(). Same query/response shape either way.
+const OPENTOPODATA_URL = '/api/bathymetry';
 
-const CONTOUR_COLOR = Cesium.Color.fromCssColorString('#3fa9ff');
+const CONTOUR_COLOR = Cesium.Color.fromCssColorString('#ffe600');
 const MARKER_TEXT_COLOR = Cesium.Color.fromCssColorString('#bfe6ff');
 
 export const DEFAULT_STATE = Object.freeze({

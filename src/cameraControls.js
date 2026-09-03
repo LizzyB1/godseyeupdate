@@ -50,8 +50,8 @@ import { computeHorizontalForward, signedRollFromLevel } from './cameraMath.js';
  * forward/backward dolly since WASD/arrow movement covers ground-plane
  * translation instead.
  *
- * There is deliberately no yaw-in-place or roll control: the camera's
- * horizon is always kept level. Every rendered frame, if `camera.roll` has
+ * There is deliberately no roll control: the camera's horizon is always
+ * kept level. Every rendered frame, if `camera.roll` has
  * drifted off level by more than a hair (native Cesium mouse-drag near the
  * poles is the main source; nothing in this module's own controls
  * introduces roll in the first place), it's snapped straight back to 0 via
@@ -69,9 +69,13 @@ import { computeHorizontalForward, signedRollFromLevel } from './cameraMath.js';
  * mouse-drag, or Cesium's own native orbit/pan.
  *
  * Mouse: holding the right button and dragging vertically pitches (same
- * axis as T/G). This claims the right mouse button, so Cesium's native
- * right-drag zoom is disabled in favor of it (scroll-wheel zoom, and the
- * R/F keys, still work).
+ * axis as T/G); dragging horizontally yaws the view left/right in place —
+ * turning where the camera is looking around its own position, not
+ * orbiting a ground focal point the way the 1/3/Q/E orbit keys do. Drag
+ * right to look right, drag left to look left, same non-inverted
+ * mouselook pairing as the vertical axis. This claims the right mouse
+ * button, so Cesium's native right-drag zoom is disabled in favor of it
+ * (scroll-wheel zoom, and the R/F keys, still work).
  *
  * Opposite-direction cancellation: holding both keys of an axis (forward
  * +backward, left+right, orbit left+right, or pitch up+down) at once
@@ -99,7 +103,8 @@ const PITCH_RATE_RAD_S = Cesium.Math.toRadians(65); // T/G pitch speed
 const ZOOM_RATE_PER_S = 0.9; // fraction of current camera height, per second
 const MIN_ZOOM_STEP_M = 0.5; // floor so zoom still moves at very low altitude
 const MAX_FRAME_DT_S = 0.1; // clamp dt after a tab is backgrounded/throttled
-const PITCH_DRAG_RAD_PER_PX = Cesium.Math.toRadians(0.15); // right-drag → pitch
+const PITCH_DRAG_RAD_PER_PX = Cesium.Math.toRadians(0.15); // right-drag vertical → pitch
+const YAW_DRAG_RAD_PER_PX = Cesium.Math.toRadians(0.15); // right-drag horizontal → yaw (look left/right in place)
 const MAX_DRAG_STEP_PX = 60; // clamp a single mousemove delta (e.g. after pointer warp/lag)
 /** Below this much roll deviation, don't bother re-snapping — avoids a setView() call every single frame from float noise. */
 const LEVEL_SNAP_EPSILON_RAD = Cesium.Math.toRadians(0.05);
@@ -401,8 +406,8 @@ function buildControlBox({ onPress, onRelease }) {
 
   const legend = document.createElement('div');
   legend.className = 'camctl-legend';
-  legend.title = 'WASD/arrows slide across the ground (forward/back relative to where the camera faces) · 1/3/Left/Right/Q/E orbit a ground point · T/G pitch · R/F zoom · mouse right-drag pitches · horizon is always kept level';
-  legend.textContent = 'WASD/arrows move · 1/3/Q/E orbit · T/G pitch · R/F zoom · horizon locked level';
+  legend.title = 'WASD/arrows slide across the ground (forward/back relative to where the camera faces) · 1/3/Left/Right/Q/E orbit a ground point · T/G pitch · R/F zoom · mouse right-drag pitches vertically and yaws left/right horizontally · horizon is always kept level';
+  legend.textContent = 'WASD/arrows move · 1/3/Q/E orbit · T/G pitch · R/F zoom · right-drag look · horizon locked level';
   body.appendChild(legend);
 
   return {
@@ -440,7 +445,7 @@ export class CameraControls {
     this._orbitRange = 0;
     this._orbitPitch = 0;
 
-    // Right-button drag state (vertical drag pitches).
+    // Right-button drag state (vertical drag pitches, horizontal drag yaws).
     this._dragActive = false;
     this._dragPointerId = null;
     this._lastDragX = 0;
@@ -488,12 +493,13 @@ export class CameraControls {
   }
 
   /**
-   * Claim the right mouse button for pitch drag: dragging vertically while
-   * the right button is held pitches, same axis as T/G. This repurposes
+   * Claim the right mouse button for look drag: dragging vertically while
+   * the right button is held pitches (same axis as T/G), and dragging
+   * horizontally yaws the view left/right in place. This repurposes
    * Cesium's native right-drag zoom, so RIGHT_DRAG is removed from the
-   * controller's zoomEventTypes (wheel/pinch zoom is untouched); rotate is
-   * suspended only while the right button is actually down, so plain
-   * left-drag orbiting is unaffected.
+   * controller's zoomEventTypes (wheel/pinch zoom is untouched); native
+   * rotate is suspended only while the right button is actually down, so
+   * plain left-drag orbiting is unaffected.
    */
   _installMouseDrag() {
     const canvas = this.viewer.canvas;
@@ -558,19 +564,30 @@ export class CameraControls {
     const rightDown = (event.buttons & CameraControls._RIGHT_BIT) !== 0;
     if (!rightDown) { this._endDrag(event); return; }
 
+    const dx = Cesium.Math.clamp(event.clientX - this._lastDragX, -MAX_DRAG_STEP_PX, MAX_DRAG_STEP_PX);
     const dy = Cesium.Math.clamp(event.clientY - this._lastDragY, -MAX_DRAG_STEP_PX, MAX_DRAG_STEP_PX);
     this._lastDragX = event.clientX;
     this._lastDragY = event.clientY;
 
+    const camera = this.viewer.camera;
+
     // Vertical drag pitches (Y-axis tilt) — up = pitch up, matching the
-    // same convention as T and non-inverted FPS-style mouselook. There's no
-    // roll gesture any more (see module doc comment), so horizontal drag is
-    // simply ignored.
+    // same convention as T and non-inverted FPS-style mouselook.
     if (dy !== 0) {
-      const camera = this.viewer.camera;
       const step = Math.abs(dy) * PITCH_DRAG_RAD_PER_PX;
       if (dy < 0) camera.lookUp(step);
       else camera.lookDown(step);
+    }
+
+    // Horizontal drag yaws the view left/right in place — a turn around the
+    // camera's own position, not an orbit around a ground point (that's
+    // still the dedicated 1/3/Q/E orbit keys). Same non-inverted pairing as
+    // pitch: drag right to look right. The per-frame roll-level snap
+    // (module doc comment) keeps the horizon flat regardless.
+    if (dx !== 0) {
+      const step = Math.abs(dx) * YAW_DRAG_RAD_PER_PX;
+      if (dx > 0) camera.lookRight(step);
+      else camera.lookLeft(step);
     }
   }
 
