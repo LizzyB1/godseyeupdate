@@ -112,8 +112,16 @@ export class StatusBox {
     }
     if (this._mapOverlays) {
       const prev = this._mapOverlays.onStatusChange;
-      this._mapOverlays.onStatusChange = (text) => {
-        prev?.(text);
+      // Forward BOTH arguments to `prev` — `data/mapOverlays.js`'s
+      // `onStatusChange` now carries a `phase` second argument (the
+      // traffic-light state) alongside `text`, and mapOverlayControls.js's
+      // own handler (whatever `prev` is here, since this box builds after
+      // it) depends on receiving it. Dropping it here silently broke the
+      // traffic light: this box's chained wrapper was overwriting
+      // mapOverlayControls.js's original two-argument handler, so
+      // `_setPhase` never ran even though the text status kept working.
+      this._mapOverlays.onStatusChange = (text, phase) => {
+        prev?.(text, phase);
         this._contourStatus = text || '';
         this._render();
       };

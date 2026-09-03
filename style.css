@@ -4,6 +4,17 @@
    ═══════════════════════════════════════════════ */
 
 :root {
+  /* Tells the browser to draw its OWN chrome — native <select> dropdown
+     popups, scrollbars/checkboxes/date pickers wherever left unstyled —
+     using a dark palette instead of the OS-default light one. Without
+     this, a <select>'s open popup list ignores this file's dark theme
+     entirely (browsers don't let page CSS restyle that native popup's
+     background) and falls back to a plain white box — which, combined
+     with `.mapovl-select`'s `color: var(--text-primary)` (white) being
+     inherited by its <option>s, rendered literal white text on a white
+     background. See also `.mapovl-select option` below for a second,
+     more direct guarantee on this app's own selects specifically. */
+  color-scheme: dark;
   --bg-dark: #000000;
   /* Alpha channel driven live by the settings dialog's transparency slider
      (src/settingsDialog.js) — every panel/box/chip below reads its
@@ -10465,6 +10476,16 @@ body.scene-playback-mode #first-run-launcher {
   font: 500 12.5px/1 var(--font-mono);
   padding: 3px 5px;
 }
+/* Explicit dark option styling — Chromium/Firefox DO honor background/
+   color set directly on <option>, unlike most other native-popup
+   styling, so this is a belt-and-suspenders fix for the select's open
+   dropdown list on top of :root's color-scheme: dark above. Without
+   this, the popup's own background stayed OS-default white while the
+   text stayed the white `color` inherited from `.mapovl-select`. */
+.mapovl-select option {
+  background: #14161c;
+  color: var(--text-primary);
+}
 .mapovl-color {
   margin-left: auto;
   width: 22px;
@@ -10522,7 +10543,14 @@ body.scene-playback-mode #first-run-launcher {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 2px 2px 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  /* Same solid chip as .mapovl-status/.mapovl-hint right below it — the
+     phase row carries the same "what's happening right now" weight as
+     those, so it gets the same guaranteed-dark backing rather than
+     leaning on the box's own (user-adjustable, sometimes quite
+     see-through) panel transparency alone. */
+  background: rgba(0, 0, 0, 0.6);
 }
 .mapovl-phase-light {
   flex: 0 0 auto;

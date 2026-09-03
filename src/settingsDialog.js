@@ -57,7 +57,18 @@ const BUILD_TIME_CLIENT_KEYS = {
 export const OPACITY_STORAGE_KEY = 'godsEyeView.settings.panelBgAlpha';
 const MIN_ALPHA = 0.2;
 const MAX_ALPHA = 0.95;
-const DEFAULT_ALPHA = 0.72;
+// Bumped from 0.72: every panel/box's background — and by extension
+// virtually all menu text, since most row/title/label text has no chip
+// of its own and leans entirely on this shared panel background for
+// contrast (see style.css's :root comment on --gev-panel-bg-alpha and the
+// text-shadow fallback right below it) — reads through this one value.
+// 0.72 let enough of a bright globe/sky/cloud background show through
+// panels to wash out white text in places. This is only the *default*
+// for anyone who hasn't touched the transparency slider yet; an already-
+// saved preference in localStorage (OPACITY_STORAGE_KEY) still wins via
+// loadStoredAlpha(), and the slider still goes as low as MIN_ALPHA for
+// anyone who wants more see-through panels.
+const DEFAULT_ALPHA = 0.85;
 
 function clampAlpha(value) {
   return Math.max(MIN_ALPHA, Math.min(MAX_ALPHA, value));
