@@ -415,8 +415,12 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 /* ── Title Bar ────────────────────────────────── */
 #title-bar {
   position: fixed;
-  top: 32px;
-  left: 36px;
+  top: 18px;
+  /* Centered on the viewport rather than pinned to the left edge, and
+     scaled down (see h1/.title-logo below) now that it's no longer
+     sharing the corner with a two-line subtitle. */
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 100;
   pointer-events: none;
   user-select: none;
@@ -424,10 +428,10 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 
 #title-bar .title-glow {
   position: absolute;
-  top: -20px;
-  left: -20px;
-  width: 200px;
-  height: 80px;
+  top: -14px;
+  left: -14px;
+  width: 140px;
+  height: 56px;
   background: radial-gradient(ellipse, var(--accent-dim) 0%, transparent 70%);
   filter: blur(20px);
   opacity: 0.6;
@@ -436,11 +440,11 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 #title-bar h1 {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   font-family: var(--font-mono);
-  font-size: 26px;
+  font-size: 17px;
   font-weight: 600;
-  letter-spacing: 8px;
+  letter-spacing: 5px;
   color: var(--text-primary);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75), 0 0 30px var(--accent-glow);
   position: relative;
@@ -449,7 +453,7 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 #title-bar .title-logo {
   position: relative;
   display: block;
-  width: 52px;
+  width: 32px;
   height: auto;
   filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.5));
 }
@@ -525,14 +529,6 @@ body.cockpit-mode #cockpit-cloud-effects.active {
   font-weight: 300;
 }
 
-#title-bar .subtitle {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 5px;
-  color: var(--text-dim);
-  margin-top: 8px;
-  text-transform: uppercase;
-}
 
 /* ── Style Indicator ──────────────────────────── */
 #style-indicator {
@@ -604,6 +600,12 @@ body.cockpit-mode #cockpit-cloud-effects.active {
   gap: 7px;
   margin-bottom: 6px;
   padding: 0 3px;
+  /* Shared by every panelDrag.js-draggable legacy panel's grip
+     (data-panel/cctv-panel/scene-panel/global-context-panel) — same
+     "ghost" text-selection-highlight risk during a drag as pp-toggles
+     had before it got this same rule directly. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .panel-mini-status {
@@ -962,6 +964,15 @@ body.cockpit-mode #cockpit-cloud-effects.active {
   background: var(--glass-bg);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   cursor: default;
+  /* Every mini-box's drag header has this (see .gpstrack-header etc.) —
+     pp-toggles is the one legacy draggable panel with its own bespoke
+     header class instead of the shared .panel-header, and it never got
+     the same protection: dragging it by this row could paint a large
+     native text-selection highlight across the header and the page
+     behind it ("ghost box" — pale blue rectangle over the title/map). */
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
 }
 
 /* Expanded Display already owns the glass shell. Keep its header visually
@@ -3877,8 +3888,6 @@ body.cockpit-mode #intel-hud .hud-bottom-left,
 body.cockpit-mode #intel-hud .hud-bottom-right {
   bottom: clamp(84px, 11vh, 118px);
 }
-body.cockpit-mode #intel-hud .hud-summary-wrap { max-width: min(34vw, 380px); }
-body.cockpit-mode #intel-hud .hud-summary { font-size: 9px; }
 body.cockpit-mode #intel-hud .hud-left-edge { left: 22px; }
 body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 
@@ -4166,35 +4175,6 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   opacity: 0.95;
 }
 
-.hud-mode {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 4px;
-  margin-top: 3px;
-}
-
-.hud-summary-wrap {
-  margin-top: 6px;
-  max-width: 420px;
-}
-
-.hud-summary-label {
-  font-size: 9px;
-  letter-spacing: 1.8px;
-  opacity: 0.55;
-}
-
-.hud-summary {
-  margin-top: 2px;
-  min-height: 16px;
-  font-size: 11px;
-  letter-spacing: 1.2px;
-  opacity: 0.88;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* Edge annotations (vertical text) */
 .hud-edge {
   position: absolute;
@@ -4287,10 +4267,6 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 #intel-hud[data-variant='minimal'] .hud-bottom-bar {
   display: flex;
   bottom: calc(12vh + 4rem);
-}
-
-#intel-hud[data-variant='minimal'] .hud-summary-wrap {
-  max-width: 280px;
 }
 
 /* ── Data Layer Toggle Panel ─────────────────── */
@@ -6722,21 +6698,21 @@ body.scene-playback-mode :is(#clear-selected-layers, #reset-globe-view) {
   }
 
   #title-bar {
-    top: 20px;
-    left: 20px;
+    top: 12px;
+    /* left/transform inherited from the base rule — stays centered. */
   }
 
   #title-bar h1 {
-    font-size: 16px;
-    letter-spacing: 4px;
+    font-size: 13px;
+    letter-spacing: 3px;
   }
 
   #title-bar h1 {
-    gap: 8px;
+    gap: 6px;
   }
 
   #title-bar .title-logo {
-    width: 36px;
+    width: 26px;
   }
 
   #location-bar {
@@ -9499,6 +9475,168 @@ body.scene-playback-mode #first-run-launcher {
 }
 .gpstrack-pad.is-collapsed .gpstrack-body { display: none; }
 
+/* Collapsed mini-boxes shrink to just their header strip — the full
+   expanded-size drop shadow (0 18px 48px, set per-box above) looks
+   visually heavy/mismatched at that size, so every "-pad" box (every
+   buildMiniBox instance: camctl/mapovl/coordbox/hudread/bathy/restoretray/
+   gpstrack/about) gets a smaller shadow while collapsed. Substring match
+   (not $=) because `.is-collapsed` is appended AFTER the base "*-pad"
+   class in the DOM, so the class attribute no longer ENDS WITH "-pad"
+   once collapsed — e.g. class="mapovl-pad is-collapsed". Higher
+   specificity than each box's own base rule, so it always wins. */
+[class*="-pad"].is-collapsed {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  /* buildMiniBox sets an explicit inline pixel height (the last dragged/
+     resized/default size) on the root, which a plain "display:none" on
+     the body does nothing to shrink — without this the root would keep
+     rendering at its full expanded height as an empty glass rectangle
+     below the header ("ghost box") every time a box is collapsed. The
+     !important is required to beat that inline style. */
+  height: auto !important;
+}
+/* The resize handle drags root height directly, which would silently
+   fight the height:auto!important above — hide it while collapsed so
+   there's nothing to grab that wouldn't visibly do anything. */
+[class*="-pad"].is-collapsed [class*="-resize-handle"] {
+  display: none;
+}
+/* Shared "×" hide-panel chip for every `buildMiniBox` box — matches the
+   square collapse-button chip next to it (see `miniBox.js`'s built-in
+   `hideable` support, on by default for every mini-box). Boxes that
+   already had their own hand-rolled `.<prefix>-close-btn` rule (Bathymetry/
+   GPS Tracks) keep it as an identical duplicate; this generic rule is what
+   covers every box that didn't (Camera, Map Overlays, Coordinates, HUD
+   Readouts, and any future one) without needing its own per-box CSS. */
+[class$="-close-btn"] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text-secondary);
+  font: 700 12px/1 var(--font-mono);
+  cursor: pointer;
+}
+[class$="-close-btn"]:hover {
+  color: #ffffff;
+  border-color: #ffffff;
+}
+
+/* ── About: standalone mini-box chrome (src/aboutBox.js) ──────────────
+   Static reference/explainer text, no engine wiring. Same movable/
+   resizable/collapsible/hideable mechanics as every other mini-box (see
+   .gpstrack-pad above); content reuses the shared `.mapovl-section*`/
+   `.mapovl-hint` classes verbatim, same reasoning as coordinatesBox.js. */
+.about-pad {
+  position: fixed;
+  z-index: 146;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--btn-radius);
+  background: var(--glass-bg);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.about-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.35);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.about-header.is-dragging { cursor: grabbing; }
+.about-grip {
+  flex: 0 0 auto;
+  font: 700 11px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+.about-title {
+  flex: 1 1 auto;
+  font: 700 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+.about-close-btn,
+.about-collapse-btn {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text-secondary);
+  font: 700 12px/1 var(--font-mono);
+  cursor: pointer;
+}
+.about-close-btn:hover { color: #ffffff; border-color: #ffffff; }
+.about-collapse-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.about-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.about-body::-webkit-scrollbar { width: 5px; }
+.about-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+}
+.about-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0.2));
+  border-radius: 999px;
+}
+.about-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 3;
+  touch-action: none;
+}
+.about-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--glass-border) 0, var(--glass-border) 1.4px,
+    transparent 1.4px, transparent 4px
+  );
+}
+.about-resize-handle:hover::after, .about-resize-handle.is-active::after {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--accent) 0, var(--accent) 1.4px,
+    transparent 1.4px, transparent 4px
+  );
+}
+.about-pad.is-collapsed .about-body { display: none; }
+
 /* ── GPS Tracks: content (drop zone / status / track rows) ──────────────── */
 .gps-track-panel__drop {
   padding: 10px 8px;
@@ -10230,6 +10368,32 @@ body.scene-playback-mode #first-run-launcher {
   );
 }
 .coordbox-pad.is-collapsed .coordbox-body { display: none; }
+/* All 5 action buttons together in one row, smaller than the app's other
+   button rows since they share the space — see coordinatesBox.js. */
+.coordbox-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.coordbox-toolbar .mapovl-btn {
+  flex: 1 1 auto;
+  width: auto;
+  font-size: 10.5px;
+  padding: 3px 5px;
+  white-space: nowrap;
+}
+.coordbox-maps-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  text-decoration: none;
+}
+.coordbox-maps-btn[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
 
 /* ── HUD Readouts: standalone mini-box chrome (src/hudReadoutsBox.js) ───
    The Intel HUD's individual data readouts (MGRS, lat/lon, GSD/NIIRS,
@@ -10341,6 +10505,32 @@ body.scene-playback-mode #first-run-launcher {
 .hudread-pad.is-collapsed .hudread-body { display: none; }
 
 /* ── HUD Readouts: content ───────────────────────────────────────────── */
+/* Rolling semantic summary line — relocated from hud.js's own corner
+   bracket (see hudReadoutsBox.js's file comment); same
+   label-over-dark-chip look as .cctv-summary-label/#cctv-summary. */
+.hudread-summary-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+.hudread-summary-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.7px;
+  color: var(--text-dim);
+}
+.hudread-summary {
+  font: 500 12px/1.45 var(--font-mono);
+  letter-spacing: 0.03em;
+  color: var(--text-primary);
+  word-break: break-word;
+  padding: 5px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--glass-border);
+}
 .hudread-section {
   display: flex;
   flex-direction: column;
@@ -10635,5 +10825,31 @@ body.scene-playback-mode #first-run-launcher {
 .bathy-pad.is-collapsed .bathy-body { display: none; }
 
 @media (max-width: 720px), (max-height: 520px) {
-  .mapovl-pad, .coordbox-pad, .hudread-pad, .restoretray-pad, .bathy-pad, .gpstrack-pad { display: none; }
+  .mapovl-pad, .coordbox-pad, .hudread-pad, .bathy-pad, .gpstrack-pad, .about-pad { display: none; }
+  /* .restoretray-pad deliberately excluded — the Hidden Panels tray must
+     stay reachable even on a small screen/viewport, or a fully-hidden
+     panel would have no way back (see panelVisibility.js). */
+}
+
+/* ── Global scrollbar override: white-on-black everywhere ───────────────
+   Every scrollable panel/box above styled its own scrollbar individually
+   (mostly a faint white-on-near-transparent look), which reads as barely
+   there against the app's dark backgrounds. Placed last and matched
+   broadly so it wins over every one of those per-box rules without having
+   to hunt down and edit each one — "make scroll bars white on black, so
+   they are obvious." `scrollbar-color` covers Firefox; the `::-webkit-*`
+   pseudo-elements cover Chrome/Edge/Safari. */
+* {
+  scrollbar-color: #ffffff #000000;
+}
+*::-webkit-scrollbar-track {
+  background: #000000 !important;
+}
+*::-webkit-scrollbar-thumb {
+  background: #ffffff !important;
+  border: 1px solid #000000;
+  border-radius: 999px !important;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #ffffff !important;
 }

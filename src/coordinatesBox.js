@@ -10,10 +10,13 @@ import { buildMiniBox } from './miniBox.js';
  * collapsed, and reset independently of the rest of Map Overlays (contours /
  * exaggeration / grid) — both boxes share one engine instance.
  *
- * Reuses the `.mapovl-*` content classes (section/row/btn/output/output-row)
+ * Reuses the `.mapovl-*` content classes (section/btn/output/output-row)
  * verbatim: those aren't scoped to a particular box's `idPrefix`, only the
  * chrome classes are (`.coordbox-*` here, see style.css), so sharing them
- * keeps the two boxes visually consistent without duplicating CSS.
+ * keeps the two boxes visually consistent without duplicating CSS. Every
+ * action button (place/clear pin, copy, open in Google Maps, reset) lives
+ * together in one `.coordbox-toolbar` row above the readout, in smaller
+ * text than elsewhere in the app since five buttons share the space.
  *
  * Same movable/resizable/persisted-position/collapsible box mechanics as
  * `cameraControls.js` and `mapOverlayControls.js`, all built on the shared
@@ -56,42 +59,64 @@ export class CoordinatesBox {
 
     const coordSection = el('div', 'mapovl-section');
 
-    const cursorRow = el('div', 'mapovl-row');
+    // Every action lives together in one compact row at the top — place/
+    // clear the pin, copy the reading, jump to Google Maps, reset the tool
+    // — in smaller text than the app's other button rows since five share
+    // the space; the output readout (lat/long, height, address) sits below
+    // it, always in the same place regardless of which buttons are enabled.
+    const toolbar = el('div', 'coordbox-toolbar');
+
     const cursorToggle = document.createElement('button');
     cursorToggle.type = 'button';
     cursorToggle.className = 'mapovl-btn';
     cursorToggle.textContent = '📍 Place cursor';
     cursorToggle.title = 'Click the map to drop/move a coordinate cursor';
+    toolbar.appendChild(cursorToggle);
+    this._cursorToggle = cursorToggle;
+
     const clearBtn = document.createElement('button');
     clearBtn.type = 'button';
     clearBtn.className = 'mapovl-btn';
     clearBtn.textContent = 'Clear pin';
-    cursorRow.appendChild(cursorToggle);
-    cursorRow.appendChild(clearBtn);
-    coordSection.appendChild(cursorRow);
-    this._cursorToggle = cursorToggle;
+    toolbar.appendChild(clearBtn);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'mapovl-btn';
+    copyBtn.textContent = 'Copy coordinates';
+    toolbar.appendChild(copyBtn);
+    this._copyBtn = copyBtn;
+
+    // A real button (not the old inline text link buried in the output
+    // rows), disabled-looking until a position exists to link to.
+    const mapsBtn = document.createElement('a');
+    mapsBtn.className = 'mapovl-btn coordbox-maps-btn';
+    mapsBtn.textContent = 'Open in Google Maps ↗';
+    mapsBtn.target = '_blank';
+    mapsBtn.rel = 'noopener noreferrer';
+    mapsBtn.setAttribute('aria-disabled', 'true');
+    toolbar.appendChild(mapsBtn);
+    this._mapsBtn = mapsBtn;
+
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'mapovl-btn';
+    resetBtn.textContent = 'Reset coordinate tool';
+    toolbar.appendChild(resetBtn);
+
+    coordSection.appendChild(toolbar);
 
     const output = el('div', 'mapovl-output');
     const outLat = el('div', 'mapovl-output-row');
     const outHeight = el('div', 'mapovl-output-row');
     const outAddr = el('div', 'mapovl-output-row');
-    const outLink = el('div', 'mapovl-output-row');
     output.appendChild(outLat);
     output.appendChild(outHeight);
     output.appendChild(outAddr);
-    output.appendChild(outLink);
     coordSection.appendChild(output);
     this._outLat = outLat;
     this._outHeight = outHeight;
     this._outAddr = outAddr;
-    this._outLink = outLink;
-
-    const copyBtn = document.createElement('button');
-    copyBtn.type = 'button';
-    copyBtn.className = 'mapovl-btn mapovl-copy-btn';
-    copyBtn.textContent = 'Copy coordinates';
-    coordSection.appendChild(copyBtn);
-    this._copyBtn = copyBtn;
 
     const copyStatus = el('div', 'mapovl-status', '');
     coordSection.appendChild(copyStatus);
@@ -104,17 +129,25 @@ export class CoordinatesBox {
     });
     clearBtn.addEventListener('click', () => this.engine.clearCursor());
     copyBtn.addEventListener('click', () => this._copyCoordinates());
-
-    const resetBtn = document.createElement('button');
-    resetBtn.type = 'button';
-    resetBtn.className = 'mapovl-btn mapovl-reset-btn';
-    resetBtn.textContent = 'Reset coordinate tool';
+    mapsBtn.addEventListener('click', (event) => {
+      if (mapsBtn.getAttribute('aria-disabled') === 'true') event.preventDefault();
+    });
     resetBtn.addEventListener('click', () => {
       this.engine.clearCursor();
       this.engine.setCursorActive(false);
       this._copyStatus.textContent = '';
     });
-    body.appendChild(resetBtn);
+  }
+
+  /** Point the Google Maps button at a live link, or grey it out when there's no position yet. */
+  _setMapsLink(href) {
+    if (href) {
+      this._mapsBtn.href = href;
+      this._mapsBtn.removeAttribute('aria-disabled');
+    } else {
+      this._mapsBtn.removeAttribute('href');
+      this._mapsBtn.setAttribute('aria-disabled', 'true');
+    }
   }
 
   _refresh() {
@@ -127,23 +160,13 @@ export class CoordinatesBox {
       this._outLat.textContent = 'No position yet.';
       this._outHeight.textContent = '';
       this._outAddr.textContent = '';
-      this._outLink.textContent = '';
+      this._setMapsLink(null);
       return;
     }
     this._outLat.textContent = `${out.dms}  (${out.decimal})`;
     this._outHeight.textContent = out.height ? `Height: ${out.height}` : '';
     this._outAddr.textContent = out.address ? `Address: ${out.address}` : '';
-    if (out.mapsLink) {
-      this._outLink.innerHTML = '';
-      const a = document.createElement('a');
-      a.href = out.mapsLink;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.textContent = 'Open in Google Maps ↗';
-      this._outLink.appendChild(a);
-    } else {
-      this._outLink.textContent = '';
-    }
+    this._setMapsLink(out.mapsLink || null);
   }
 
   async _copyCoordinates() {

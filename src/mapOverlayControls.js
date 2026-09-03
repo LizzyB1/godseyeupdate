@@ -54,11 +54,11 @@ export class MapOverlayControls {
       title: 'MAP OVERLAYS',
       ariaLabel: 'Map overlay controls: contours, height exaggeration, and coordinate grid',
       defaultWidth: 268,
-      defaultHeight: 620,
+      defaultHeight: 460,
       minWidth: 220,
       maxWidth: 440,
       minHeight: 260,
-      maxHeight: 880,
+      maxHeight: 760,
       anchor: { right: '16px', top: '16px' },
       onHeaderBuilt: (header) => {
         const shareBtn = document.createElement('button');

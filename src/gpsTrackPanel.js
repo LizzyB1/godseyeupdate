@@ -1,5 +1,4 @@
 import { buildMiniBox } from './miniBox.js';
-import { hidePanel, isPanelHidden } from './panelVisibility.js';
 import { parseTrackFile } from './data/gpsTrackParse.js';
 
 /**
@@ -12,11 +11,11 @@ import { parseTrackFile } from './data/gpsTrackParse.js';
  * round-trip.
  *
  * Same movable/resizable/persisted-position/collapsible/hideable box
- * mechanics as the app's other mini-boxes (`miniBox.js` +
- * `panelVisibility.js`) — see `bathymetryBox.js` for the pattern this
- * mirrors. Reuses the shared `.mapovl-*`-style dark-chip content look
- * where it fits, but keeps its own `.gps-track-panel__*` content classes
- * for the drop zone / row list, which are specific to this box.
+ * mechanics as the app's other mini-boxes, all built on `miniBox.js`
+ * (which supplies the hide button and restore-tray label automatically).
+ * Reuses the shared `.mapovl-*`-style dark-chip content look where it
+ * fits, but keeps its own `.gps-track-panel__*` content classes for the
+ * drop zone / row list, which are specific to this box.
  *
  * @module gpsTrackPanel
  */
@@ -63,25 +62,8 @@ export class GpsTrackPanel {
       minHeight: 200,
       maxHeight: 560,
       anchor: { right: '16px', top: '440px' },
-      onHeaderBuilt: (header) => {
-        const closeBtn = document.createElement('button');
-        closeBtn.type = 'button';
-        closeBtn.className = 'gpstrack-close-btn';
-        closeBtn.title = 'Hide panel — restore it from the Hidden Panels tray';
-        closeBtn.setAttribute('aria-label', 'Hide GPS Tracks panel');
-        closeBtn.textContent = '×';
-        closeBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          hidePanel('gpstrack-pad');
-        });
-        header.appendChild(closeBtn);
-      },
     });
     this._box = box;
-    // The box is built well after ui.js's one-time `applyStoredHiddenState()`
-    // pass (it doesn't exist yet at that point), so a previously-hidden
-    // state has to be re-applied here instead of relying on that pass.
-    box.root.classList.toggle('panel-fully-hidden', isPanelHidden('gpstrack-pad'));
     const body = box.body;
 
     const drop = el(

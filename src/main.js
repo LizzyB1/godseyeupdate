@@ -38,6 +38,7 @@ import { initMapOverlays } from './data/mapOverlays.js';
 import { initMapOverlayControls } from './mapOverlayControls.js';
 import { initCoordinatesBox } from './coordinatesBox.js';
 import { initPanelRestoreTray } from './panelRestoreTray.js';
+import { initAboutBox } from './aboutBox.js';
 import { initBathymetry } from './data/bathymetry.js';
 import { initBathymetryBox } from './bathymetryBox.js';
 import { resolveApiKey } from './apiKeys.js';
@@ -370,6 +371,10 @@ async function init() {
     // (this box).
     const panelRestoreTray = initPanelRestoreTray();
 
+    // Static reference/explainer box — data-source credits, status-line
+    // formats, etc. — see src/aboutBox.js.
+    const aboutBox = initAboutBox();
+
     // GUI overhaul: lets the DISPLAY, DATA LAYERS, CCTV, SCENES, and CONTEXT
     // panels be dragged free of their managed stacks — see src/panelDrag.js
     // for why the command-dock hover trays (Visual Presets/Location) are
@@ -471,6 +476,7 @@ async function init() {
       bathymetry,
       bathymetryBox,
       panelRestoreTray,
+      aboutBox,
       panelDrag,
       getRenderGovernorDiagnostics,
       requestRender: governorRequestRender,

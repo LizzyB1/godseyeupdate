@@ -76,6 +76,17 @@ const MARKER_TARGET_COLS = 5;
 // fetched grid's [min, max] range are actually traced each recompute.
 const CONTOUR_LEVELS = [-10, -20, -50, -100, -200, -500, -1000, -1500, -2000, -3000, -4000, -5000, -6000, -7000, -8000, -9000, -10000];
 
+/**
+ * Temporary kill-switch: the whole feature is benched — contours/markers/
+ * flags never auto-start (even from persisted state), every setter is a
+ * no-op, and `src/bathymetryBox.js` disables its own controls (greyed out
+ * with a status note, not hidden) rather than letting the operator turn
+ * any of this back on. Flip this back to `false` to re-enable once the
+ * underlying reliability issue (contours briefly appearing then vanishing,
+ * flags rendering poorly) is sorted out.
+ */
+export const BATHYMETRY_DISABLED = true;
+
 const GRID_CACHE_STORE = 'bathyDepth';
 const GRID_CACHE_PRECISION = 2; // decimal degrees (~1.1km) — cache key rounding.
 // Same-origin proxy (see vite.config.js's bathymetryProxy) — NOT
@@ -145,6 +156,11 @@ export class BathymetryEngine {
   constructor(viewer) {
     this.viewer = viewer;
     this.state = loadState();
+    if (BATHYMETRY_DISABLED) {
+      // Ignore whatever a prior session persisted — the feature stays off
+      // until BATHYMETRY_DISABLED is flipped back, not just "off by default".
+      this.state = { ...this.state, contoursEnabled: false, markersEnabled: false, depthFlagsEnabled: false };
+    }
 
     this._contourDataSource = new Cesium.CustomDataSource('bathymetryContours');
     this._markerDataSource = new Cesium.CustomDataSource('bathymetryMarkers');
@@ -177,7 +193,7 @@ export class BathymetryEngine {
     // A prior session may have left either toggle on (state is persisted) —
     // register the credit now rather than only from the setters, which this
     // restore path bypasses.
-    if (this.state.contoursEnabled || this.state.markersEnabled) {
+    if (!BATHYMETRY_DISABLED && (this.state.contoursEnabled || this.state.markersEnabled)) {
       registerDynamicCredit(this.viewer, GEBCO_DEPTH_CREDIT);
       this._scheduleRecompute();
     }
@@ -205,6 +221,7 @@ export class BathymetryEngine {
 
   // ── toggles ──────────────────────────────────────────────────────────
   setContoursEnabled(enabled) {
+    if (BATHYMETRY_DISABLED) return;
     this.state.contoursEnabled = Boolean(enabled);
     this._persist();
     if (this.state.contoursEnabled) {
@@ -219,6 +236,7 @@ export class BathymetryEngine {
   }
 
   setMarkersEnabled(enabled) {
+    if (BATHYMETRY_DISABLED) return;
     this.state.markersEnabled = Boolean(enabled);
     this._persist();
     if (this.state.markersEnabled) {
@@ -238,6 +256,7 @@ export class BathymetryEngine {
    * though it has nothing to draw unless contours are also being computed.
    */
   setDepthFlagsEnabled(enabled) {
+    if (BATHYMETRY_DISABLED) return;
     this.state.depthFlagsEnabled = Boolean(enabled);
     this._persist();
     if (this.state.depthFlagsEnabled && this.state.contoursEnabled) this._scheduleRecompute();
@@ -253,24 +272,28 @@ export class BathymetryEngine {
 
   // ── depth flag label style ──────────────────────────────────────────
   setFlagFontSize(px) {
+    if (BATHYMETRY_DISABLED) return;
     this.state.flagFontSize = Cesium.Math.clamp(Number(px) || DEFAULT_FLAG_FONT_SIZE, 12, 48);
     this._persist();
     if (this.state.depthFlagsEnabled) this._rebuildDepthFlagsOnly();
   }
 
   setFlagBgColor(hex) {
+    if (BATHYMETRY_DISABLED) return;
     this.state.flagBgColor = hex || DEFAULT_STATE.flagBgColor;
     this._persist();
     if (this.state.depthFlagsEnabled) this._rebuildDepthFlagsOnly();
   }
 
   setFlagBgAlpha(alpha) {
+    if (BATHYMETRY_DISABLED) return;
     this.state.flagBgAlpha = Cesium.Math.clamp(Number(alpha), 0, 1);
     this._persist();
     if (this.state.depthFlagsEnabled) this._rebuildDepthFlagsOnly();
   }
 
   setFlagLabelStep(step) {
+    if (BATHYMETRY_DISABLED) return;
     this.state.flagLabelStep = Math.max(1, Math.round(Number(step)) || 1);
     this._persist();
     if (this.state.depthFlagsEnabled) this._rebuildDepthFlagsOnly();

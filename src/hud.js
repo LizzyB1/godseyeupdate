@@ -60,12 +60,13 @@ const NEARBY_POINTS = Object.values(CITY_POIS)
 /**
  * Full-screen intelligence HUD overlay rendered on top of the Cesium canvas.
  *
- * Displays the mode label and a rolling semantic summary line here in its
- * own corner bracket. The MGRS/lat-lon/GSD/NIIRS/
- * ALT/SUN/AIS/COLL/ONA/bottom-line readouts are computed and written here
- * too, but rendered in `hudReadoutsBox.js`'s standalone box — see that
- * module and the file-level comment above. All values derive from the live
- * camera position and update on independent timer cadences.
+ * The rolling semantic summary line, and the MGRS/lat-lon/GSD/NIIRS/ALT/
+ * SUN/AIS/COLL/ONA/bottom-line readouts, are all computed and written here,
+ * but rendered in `hudReadoutsBox.js`'s standalone "SUMMARY" section/box —
+ * see that module and the file-level comment above. All values derive from
+ * the live camera position and update on independent timer cadences. Only
+ * the static BAND/BITS/LVL edge strip still renders directly inside this
+ * overlay's own corner bracket.
  */
 export class IntelHUD {
   /**
@@ -134,34 +135,27 @@ export class IntelHUD {
   }
 
   /**
-   * Construct the HUD DOM structure inside the existing `#intel-hud` element.
-   * Populates the mode label, the rolling summary line, and the static
-   * BAND/BITS/LVL edge strip. Everything else that used to live in these
-   * corner brackets — the classification banner, the random per-session
-   * mission/sensor-ID line, the REC blink dot, and the ORB/PASS orbital
-   * line — was pure decoration with no real state behind it and has been
-   * removed outright (not relocated). The timestamp WAS a real live value,
-   * so it moved to `hudReadoutsBox.js` instead of being deleted — see the
-   * file-level comment. `_updateCameraData`/`_startTimers` still find and
-   * write MGRS/lat-lon/GSD/NIIRS/ALT/SUN/AIS/COLL/ONA/bottom-line/timestamp
-   * by id regardless of which module created them.
+   * Construct the HUD DOM structure inside the existing `#intel-hud`
+   * element. Populates only the static BAND/BITS/LVL edge strip now.
+   * Everything else that used to live in the top-left corner bracket —
+   * the classification banner, the random per-session mission/sensor-ID
+   * line, the REC blink dot, and the ORB/PASS orbital line — was pure
+   * decoration with no real state behind it and has been removed outright
+   * (not relocated). The mode label ("NORMAL"/"CRT"/...) was real but
+   * redundant with the "ACTIVE STYLE" indicator already on screen, so it's
+   * gone too — dropped from both this corner and the composed summary
+   * line (see `_composeSummary`). The rolling summary line WAS a real live
+   * value, so — like the timestamp before it — it moved to
+   * `hudReadoutsBox.js`'s own "SUMMARY" section instead of being deleted;
+   * see the file-level comment. `_updateCameraData`/`_startTimers` still
+   * find and write MGRS/lat-lon/GSD/NIIRS/ALT/SUN/AIS/COLL/ONA/bottom-
+   * line/timestamp/summary by id regardless of which module created them.
    */
   _buildDOM() {
     this._el = document.getElementById('intel-hud');
     if (!this._el) return;
 
     this._el.innerHTML = `
-      <div class="hud-corner hud-top-left">
-        <div class="hud-bracket">┌</div>
-        <div class="hud-content">
-          <div class="hud-mode" id="hud-mode">NORMAL</div>
-          <div class="hud-summary-wrap">
-            <div class="hud-summary-label">SUMMARY</div>
-            <div class="hud-summary" id="hud-summary">Awaiting telemetry...</div>
-          </div>
-        </div>
-      </div>
-
       <div class="hud-edge hud-right-edge">
         <div>BAND: PAN</div>
         <div>BITS: 11</div>
@@ -515,7 +509,7 @@ export class IntelHUD {
 
   /**
    * Build the one-line semantic summary string from the latest camera metrics.
-   * Includes mode, observation band, nearest POI or lat/lon sector, region,
+   * Includes observation band, nearest POI or lat/lon sector, region,
    * altitude, view window dimensions, sun elevation, ONA, and local timezone.
    * @returns {string} Formatted summary line for the HUD summary readout.
    */
@@ -523,8 +517,6 @@ export class IntelHUD {
     const m = this._latestMetrics;
     if (!m) return 'Awaiting telemetry...';
 
-    const modeEl = document.getElementById('hud-mode');
-    const modeLabel = modeEl?.textContent || 'NORMAL';
     const region = this._regionLabel(m.latDeg, m.lonDeg);
     const nearest = this._nearestKnownPoint(m.latDeg, m.lonDeg);
     const band = this._viewBand(m.altM);
@@ -545,7 +537,7 @@ export class IntelHUD {
     // NEAR the nearest catalogued POI at metro range; otherwise the lat/lon sector.
     const localityTag = composeLocalityTag(nearest, m.latDeg, m.lonDeg);
 
-    return `${modeLabel} ${band} ${localityTag} | ${region} | ALT ${altTag} | WINDOW ${winTag} | SUN ${m.sunEl.toFixed(0)}° | ONA ${m.ona.toFixed(0)}° | ${localTag}`;
+    return `${band} ${localityTag} | ${region} | ALT ${altTag} | WINDOW ${winTag} | SUN ${m.sunEl.toFixed(0)}° | ONA ${m.ona.toFixed(0)}° | ${localTag}`;
   }
 
   /**
@@ -673,20 +665,14 @@ export class IntelHUD {
   // ── Public API ──────────────────────────
 
   /**
-   * React to a shader-style change. Updates the mode label, HUD color
-   * scheme (via CSS custom properties), and auto-shows/hides the overlay
-   * when in auto mode.
+   * React to a shader-style change. Updates the HUD color scheme (via CSS
+   * custom properties), tracks the style for `_composeSummary`'s view-band
+   * wording, and auto-shows/hides the overlay when in auto mode.
    * @param {string} styleName - Active style key (e.g. `'retro'`, `'normal'`).
    */
   onStyleChange(styleName) {
     this._currentStyle = styleName;
 
-    // Update mode label
-    const modeEl = document.getElementById('hud-mode');
-    if (modeEl) {
-      const modeNames = { retro: 'CRT' };
-      modeEl.textContent = modeNames[styleName] || styleName.toUpperCase();
-    }
     // Update color scheme
     const colors = HUD_COLORS[styleName] || HUD_COLORS._default;
     if (this._el) {

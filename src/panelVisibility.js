@@ -19,6 +19,14 @@
 
 const STORAGE_KEY = 'godsEyeView.hiddenPanels.v1';
 
+/** Panel ids that can never be added to the hidden set — the Hidden Panels
+ * tray itself, since hiding it would remove the only way to un-hide
+ * anything else. `hidePanel` refuses these outright (it doesn't even carry
+ * a "×" button per bathymetryBox.js's pattern, but this guard makes it
+ * impossible to hide by any other route too — e.g. a future "hide all"
+ * helper, or a stray call passing the wrong id). */
+const NEVER_HIDDEN_IDS = new Set(['restoretray-pad']);
+
 /** Human labels for the restore tray — kept separate from live DOM text
  * since a hidden panel's own title may itself be hard to read/derive
  * reliably (e.g. control-panel's header is a whole `<button>`). */
@@ -29,16 +37,36 @@ export const PANEL_LABELS = {
   'data-panel': 'Data Layers',
   'control-panel': 'Visual Presets',
   'location-bar': 'Location',
-  'bathy-pad': 'Bathymetry',
-  'gpstrack-pad': 'GPS Tracks',
+  'scene-panel': 'Scenes',
+  // Every `buildMiniBox`-based box (camera controls, map overlays,
+  // coordinates, HUD readouts, bathymetry, GPS tracks, about, ...)
+  // self-registers its own label here via `registerPanelLabel` the moment
+  // it's built, instead of needing an entry hardcoded in this list — see
+  // `miniBox.js`. The handful of legacy `.panel-collapsible`-system panels
+  // above (whose ids/titles live in `index.html`, not a shared factory)
+  // are the only ones still listed by hand.
 };
+
+/**
+ * Registers a hideable panel's human label for the restore tray, so a
+ * box built via `buildMiniBox` doesn't also need a hand-maintained entry
+ * in the static `PANEL_LABELS` map above. Safe to call more than once for
+ * the same id (e.g. hot-reload) — later calls simply overwrite the label.
+ * @param {string} id
+ * @param {string} label
+ */
+export function registerPanelLabel(id, label) {
+  if (!id || !label) return;
+  PANEL_LABELS[id] = label;
+}
 
 function loadHidden() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return new Set();
     const parsed = JSON.parse(raw);
-    return new Set(Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : []);
+    const ids = Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string' && !NEVER_HIDDEN_IDS.has(id)) : [];
+    return new Set(ids);
   } catch {
     return new Set();
   }
@@ -74,7 +102,7 @@ export function getHiddenPanelIds() {
 
 /** @param {string} id */
 export function hidePanel(id) {
-  if (!id || hidden.has(id)) return;
+  if (!id || hidden.has(id) || NEVER_HIDDEN_IDS.has(id)) return;
   hidden.add(id);
   saveHidden(hidden);
   applyDom(id);

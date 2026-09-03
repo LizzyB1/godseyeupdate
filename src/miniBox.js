@@ -1,16 +1,26 @@
 /**
- * @file Generic movable, resizable, collapsible "mini control box" — the
- * same drag/resize/persist mechanics originally built for the on-screen
- * camera pad, factored out so small toggleable-controls panels (camera
- * controls, map overlays) don't each reimplement pointer-drag math,
+ * @file Generic movable, resizable, collapsible, hideable "mini control
+ * box" — the same drag/resize/persist mechanics originally built for the
+ * on-screen camera pad, factored out so small toggleable-controls panels
+ * (camera controls, map overlays) don't each reimplement pointer-drag math,
  * localStorage geometry persistence, and viewport clamping.
  *
  * `cameraControls.js`'s `buildControlBox` now builds on this helper too
  * (via `idPrefix: 'camctl'`), so all of the app's mini control boxes share
  * one implementation.
  *
+ * Full "Hide panel" (×) support is built in here (see `hideable` below) and
+ * on by default, so every box built on this helper — current and future —
+ * is hideable from the Hidden Panels tray with zero extra per-box code;
+ * individual boxes used to each hand-roll their own close button wired
+ * into `panelVisibility.js`, which meant it was easy for a new box to
+ * quietly ship without one (as happened with Camera, Map Overlays,
+ * Coordinates, and HUD Readouts before this).
+ *
  * @module miniBox
  */
+
+import { hidePanel, isPanelHidden, registerPanelLabel } from './panelVisibility.js';
 
 const EDGE_INSET = 6;
 
@@ -37,7 +47,8 @@ function clampToViewport(left, top, width, height) {
  * @param {number} [opts.minHeight=180]
  * @param {number} [opts.maxHeight=720]
  * @param {Object} [opts.anchor] - CSS anchor for the default position, e.g. {right:'16px', top:'16px'} or {left:'16px', bottom:'calc(2vh + 4.5rem)'}.
- * @param {(header:HTMLElement)=>void} [opts.onHeaderBuilt] - Append extra header controls (e.g. a screenshot button) after the title/collapse toggle.
+ * @param {(header:HTMLElement)=>void} [opts.onHeaderBuilt] - Append extra header controls (e.g. a screenshot button) before the hide/collapse toggles.
+ * @param {boolean} [opts.hideable=true] - Add a "×" hide button wired into `panelVisibility.js` (keyed on the box's own id, e.g. "camctl-pad") and self-register its label for the Hidden Panels restore tray. Pass `false` only for a box that must always stay on screen (e.g. the restore tray itself, which is everyone's way back).
  * @returns {{root:HTMLElement, body:HTMLElement, header:HTMLElement, resetGeometry:Function, destroy:Function}}
  */
 export function buildMiniBox(opts) {
@@ -54,6 +65,7 @@ export function buildMiniBox(opts) {
     maxHeight = 720,
     anchor = { left: '24px', bottom: 'calc(2vh + 4.5rem)' },
     onHeaderBuilt,
+    hideable = true,
   } = opts;
 
   const cls = (suffix) => `${idPrefix}-${suffix}`;
@@ -80,6 +92,21 @@ export function buildMiniBox(opts) {
   header.appendChild(titleEl);
 
   if (typeof onHeaderBuilt === 'function') onHeaderBuilt(header);
+
+  if (hideable) {
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = cls('close-btn');
+    closeBtn.title = 'Hide panel — restore it from the Hidden Panels tray';
+    closeBtn.setAttribute('aria-label', `Hide ${title} panel`);
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      hidePanel(root.id);
+    });
+    header.appendChild(closeBtn);
+    registerPanelLabel(root.id, title);
+  }
 
   const collapseBtn = document.createElement('button');
   collapseBtn.type = 'button';
@@ -110,6 +137,12 @@ export function buildMiniBox(opts) {
   root.appendChild(resizeHandle);
 
   document.body.appendChild(root);
+
+  // Boxes are built well after ui.js's one-time startup
+  // `applyStoredHiddenState()` pass (most don't exist yet at that point),
+  // so a previously-hidden state has to be re-applied here instead of
+  // relying on that pass.
+  if (hideable) root.classList.toggle('panel-fully-hidden', isPanelHidden(root.id));
 
   const posKey = `${storagePrefix}pos`;
   const sizeKey = `${storagePrefix}size`;

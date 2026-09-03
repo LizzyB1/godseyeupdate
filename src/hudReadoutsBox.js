@@ -1,18 +1,20 @@
 import { buildMiniBox } from './miniBox.js';
 
 /**
- * @file Standalone "HUD Readouts" mini control box: the individual
- * intelligence-HUD data readouts — MGRS, lat/lon, GSD/NIIRS, ALT/SUN, AIS,
- * COLL, ONA, the combined bottom line, and the UTC timestamp — that used
- * to be baked uncontrolled into `#intel-hud`'s corner brackets (see
- * `hud.js`). They're pure data sinks: `hud.js`'s `_updateCameraData()`/
- * `_startTimers()` and `data/aisLiveVessels.js` write into them by element
- * id exactly as before — this module just owns where those elements
- * physically live (in their own movable/resizable/collapsible box, with a
- * copy-to-clipboard button) instead of fixed inside the cinematic HUD
- * overlay. (The classification banner, mission/sensor-ID line, REC blink
- * dot, and ORB/PASS orbital line were pure decoration with no real value
- * behind them — those were deleted outright, not relocated.)
+ * @file Standalone "HUD Readouts" mini control box: the rolling semantic
+ * SUMMARY line plus the individual intelligence-HUD data readouts — MGRS,
+ * lat/lon, GSD/NIIRS, ALT/SUN, AIS, COLL, ONA, the combined bottom line,
+ * and the UTC timestamp — that used to be baked uncontrolled into
+ * `#intel-hud`'s corner brackets (see `hud.js`). They're pure data sinks:
+ * `hud.js`'s `_updateCameraData()`/`_startTimers()`/`_setSummaryText()`
+ * and `data/aisLiveVessels.js` write into them by element id exactly as
+ * before — this module just owns where those elements physically live (in
+ * their own movable/resizable/collapsible box, with a copy-to-clipboard
+ * button) instead of fixed inside the cinematic HUD overlay. (The
+ * classification banner, mode label, mission/sensor-ID line, REC blink
+ * dot, and ORB/PASS orbital line were pure decoration/redundant with the
+ * "ACTIVE STYLE" indicator elsewhere on screen — those were deleted
+ * outright, not relocated; see `hud.js`'s `_buildDOM` comment.)
  *
  * These readouts only update while `hud.js`'s own visibility flag is on
  * (the Intel HUD toggle in the Display panel — see `IntelHUD#show`/
@@ -67,6 +69,26 @@ export class HudReadoutsBox {
     this._box = box;
     const body = box.body;
 
+    // The rolling semantic summary line, formerly its own bracket floating
+    // over the map in hud.js — see the file-level comment. Kept as its
+    // own labeled section, above the individual readouts, since it reads
+    // as a sentence rather than a row of the others' short data chips.
+    const summarySection = document.createElement('div');
+    summarySection.className = 'hudread-summary-section';
+    const summaryLabel = document.createElement('div');
+    summaryLabel.id = 'hud-summary-label';
+    summaryLabel.className = 'hudread-summary-label';
+    summaryLabel.textContent = 'SUMMARY';
+    const summary = document.createElement('div');
+    summary.id = 'hud-summary';
+    summary.className = 'hudread-summary';
+    summary.textContent = 'Awaiting telemetry...';
+    summarySection.appendChild(summaryLabel);
+    summarySection.appendChild(summary);
+    body.appendChild(summarySection);
+    this._summaryLabel = summaryLabel;
+    this._summary = summary;
+
     const section = document.createElement('div');
     section.className = 'hudread-section';
     this._rows = {};
@@ -94,7 +116,8 @@ export class HudReadoutsBox {
   }
 
   async _copy(btn) {
-    const text = READOUTS.map(({ id }) => this._rows[id]?.textContent || '').join('\n');
+    const lines = [this._summary?.textContent || '', ...READOUTS.map(({ id }) => this._rows[id]?.textContent || '')];
+    const text = lines.join('\n');
     try {
       await navigator.clipboard.writeText(text);
       const original = btn.textContent;

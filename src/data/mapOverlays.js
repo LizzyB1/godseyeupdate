@@ -51,6 +51,14 @@ const MAX_GRID_LINES_PER_AXIS = 60;
 // after a short delay instead of leaving contours sparse/missing.
 const RETRY_MIN_FINITE_FRACTION = 0.6;
 const RETRY_DELAY_MS = 800;
+// A single retry often isn't enough right after boot or a big pan/zoom —
+// tiles can take longer than 800ms to stream in, especially several in a
+// row during an intro camera flight. Retrying a few times (still capped,
+// never a loop) instead of giving up after one attempt is what actually
+// fixes "contours show briefly then disappear": that was sparse first-pass
+// data getting drawn, then immediately cleared/replaced once the single
+// retry ran and still found the view mid-load.
+const MAX_RECOMPUTE_RETRIES = 4;
 /** Cache store name (see data/apiCache.js) for reverse-geocode results — addresses for a given point essentially never change. */
 const GEOCODE_CACHE_STORE = 'geocode';
 /** The only vertical-exaggeration multipliers the UI (and this engine) accept — see `setVerticalExaggeration`. */
@@ -121,8 +129,8 @@ export class MapOverlaysEngine {
     this._recomputeTimer = null;
     this._contourStatus = ''; // status line shown in the UI
     this._computeToken = 0;
-    /** Whether a sparse-height retry has already fired for the in-flight recompute cycle — bounds it to one retry, never a loop. */
-    this._retriedThisCycle = false;
+    /** How many sparse-height retries have fired for the in-flight recompute cycle — bounds it to MAX_RECOMPUTE_RETRIES, never a loop. */
+    this._retryCountThisCycle = 0;
 
     // Elevation-flag entities (see data/contourFlags.js) — a separate
     // CustomDataSource from the plain contour lines (which are raw
@@ -328,7 +336,7 @@ export class MapOverlaysEngine {
 
   _scheduleRecompute() {
     if (this._recomputeTimer) clearTimeout(this._recomputeTimer);
-    this._retriedThisCycle = false;
+    this._retryCountThisCycle = 0;
     this._recomputeTimer = setTimeout(() => this._recomputeContours(), RECOMPUTE_DEBOUNCE_MS);
   }
 
@@ -366,11 +374,18 @@ export class MapOverlaysEngine {
     if (token !== this._computeToken) return; // superseded by a newer request
 
     const finite = heights.filter(Number.isFinite);
-    if (finite.length / heights.length < RETRY_MIN_FINITE_FRACTION && !this._retriedThisCycle) {
-      // Likely a freshly-panned-to area whose tiles haven't streamed in yet
-      // — retry once shortly rather than leaving contours sparse or absent.
-      this._retriedThisCycle = true;
+    const sparse = finite.length / heights.length < RETRY_MIN_FINITE_FRACTION;
+    if (sparse && this._retryCountThisCycle < MAX_RECOMPUTE_RETRIES) {
+      // Likely a freshly-panned-to (or freshly-booted) area whose tiles
+      // haven't streamed in yet. Wait for a retry rather than drawing
+      // contours from this partial sample and immediately replacing (or
+      // clearing) them a moment later once better data arrives — that
+      // flash-then-change/flash-then-empty is what "contours show at boot
+      // but disappear" was.
+      this._retryCountThisCycle += 1;
+      this._setStatus('Sampling scene heights… (waiting for tiles to finish loading)');
       setTimeout(() => { if (token === this._computeToken) this._recomputeContours(); }, RETRY_DELAY_MS);
+      return;
     }
     if (!finite.length) {
       this._clearContours();

@@ -1,5 +1,5 @@
 import { buildMiniBox } from './miniBox.js';
-import { hidePanel, isPanelHidden } from './panelVisibility.js';
+import { BATHYMETRY_DISABLED } from './data/bathymetry.js';
 
 /**
  * @file "Bathymetry" mini control box: toggles for undersea depth contour
@@ -10,10 +10,8 @@ import { hidePanel, isPanelHidden } from './panelVisibility.js';
  * see `coordinatesBox.js` for why that's safe: those classes aren't
  * scoped to a particular box's `idPrefix`, only the chrome classes are.
  *
- * Also gets a header "×" hide button wired straight into the shared
- * `panelVisibility.js` registry (see `PANEL_LABELS['bathy-pad']` there),
- * so closing it surfaces a "Restore" entry in the Hidden Panels tray like
- * every other panel in the app.
+ * The header "×" hide button, and its entry in the Hidden Panels restore
+ * tray, come for free from `buildMiniBox` — see `miniBox.js`.
  *
  * @module bathymetryBox
  */
@@ -40,31 +38,17 @@ export class BathymetryBox {
       title: 'BATHYMETRY',
       ariaLabel: 'Bathymetry controls: undersea depth contours and depth markers',
       defaultWidth: 250,
-      defaultHeight: 380,
+      defaultHeight: 270,
       minWidth: 200,
       maxWidth: 400,
       minHeight: 180,
-      maxHeight: 560,
+      maxHeight: 460,
       anchor: { right: '16px', top: '160px' },
-      onHeaderBuilt: (header) => {
-        const closeBtn = document.createElement('button');
-        closeBtn.type = 'button';
-        closeBtn.className = 'bathy-close-btn';
-        closeBtn.title = 'Hide panel — restore it from the Hidden Panels tray';
-        closeBtn.setAttribute('aria-label', 'Hide Bathymetry panel');
-        closeBtn.textContent = '×';
-        closeBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          hidePanel('bathy-pad');
-        });
-        header.appendChild(closeBtn);
-      },
+      // Hide (×) button, initial hidden-state restore, and the Hidden
+      // Panels tray label are all handled centrally by `buildMiniBox` now
+      // — see `miniBox.js`.
     });
     this._box = box;
-    // The box is built well after ui.js's one-time `applyStoredHiddenState()`
-    // pass (it doesn't exist yet at that point), so a previously-hidden
-    // state has to be re-applied here instead of relying on that pass.
-    box.root.classList.toggle('panel-fully-hidden', isPanelHidden('bathy-pad'));
     const body = box.body;
 
     const section = el('div', 'mapovl-section');
@@ -157,6 +141,20 @@ export class BathymetryBox {
       'Isobaths and depth readouts: GEBCO grid via opentopodata.org (public, no key, rate-limited — cached once looked up). Depth flags need "Show depth contours" on, and stay clustered near the middle of the view, clear of any control panel in the way.',
     ));
 
+    if (BATHYMETRY_DISABLED) {
+      // Benched, not hidden: the controls stay visible (so the feature
+      // isn't erased from the UI) but greyed out and unusable via the
+      // native `disabled` attribute, backed by BATHYMETRY_DISABLED
+      // guarding every engine setter too (see data/bathymetry.js).
+      for (const input of [contourEnable, markerEnable, flagEnable, flagStepSelect, flagSizeInput, flagBgColorInput, flagBgAlphaInput]) {
+        input.disabled = true;
+      }
+      section.insertBefore(
+        el('div', 'mapovl-hint', 'Bathymetry is temporarily disabled — contours were rendering unreliably (showing then vanishing) with poorly-placed labels. Controls are shown but inactive until this is fixed.'),
+        section.firstChild.nextSibling, // right after the section title
+      );
+    }
+
     body.appendChild(section);
 
     const status = el('div', 'mapovl-status', '');
@@ -165,6 +163,7 @@ export class BathymetryBox {
   }
 
   _setStatus(text) {
+    if (BATHYMETRY_DISABLED) { this._status.textContent = 'Disabled.'; return; }
     this._status.textContent = text || '';
   }
 

@@ -53,7 +53,7 @@ export const DEFAULT_FLAG_BG_ALPHA = 0.92;
 const CENTER_CIRCLE_RADIUS_FRACTION = 0.38;
 
 /** Every mini-box / hideable-panel root id known to the app — the full set `installFlagAvoidance` checks flags against. Sourced from `panelVisibility.js`'s registry (the hideable panels) plus every `buildMiniBox` instance (not all of which are hideable), so a flag is nudged clear of ANY visible control box, not just the ones with a "×" hide button. */
-const MINIBOX_PANEL_IDS = ['restoretray-pad', 'mapovl-pad', 'coordbox-pad', 'hudread-pad', 'bathy-pad', 'camctl-pad', 'gpstrack-pad'];
+const MINIBOX_PANEL_IDS = ['restoretray-pad', 'mapovl-pad', 'coordbox-pad', 'hudread-pad', 'bathy-pad', 'camctl-pad', 'gpstrack-pad', 'about-pad'];
 const AVOIDANCE_PANEL_IDS = [...new Set([...Object.keys(PANEL_LABELS), ...MINIBOX_PANEL_IDS])];
 
 /** Clamp current camera altitude into a sensible pole-rise, so the flag is always a visible "stuck into the line" affordance regardless of what value it's labeling. */
@@ -209,12 +209,57 @@ export function clampToCenterCircle(screenX, screenY, canvasWidth, canvasHeight)
   return { x: centerX + dx * scale, y: centerY + dy * scale };
 }
 
+/** Minimum on-screen separation (px, along the ring) kept between two flags that both get pulled onto the center circle — see {@link spreadRingAngles}. */
+const MIN_RING_LABEL_PX = 56;
+
+/**
+ * Given the angles (radians, any order) of every flag that's being pulled
+ * onto the center circle this frame, return new angles that keep every
+ * neighboring pair at least `minAngleSep` apart, preserving their relative
+ * (sorted) order. Without this, flags sharing a similar bearing from the
+ * viewport's center — which is common here, since flags already cluster
+ * toward the view's west edge (see `westmostSegmentPoint`) — would all
+ * land on nearly the same point on the circle and stack unreadably on top
+ * of each other. Falls back to an even fan across the available ring space
+ * when there genuinely isn't room to keep every original bearing (e.g.
+ * many flags all biased toward the same edge of the view).
+ * @param {number[]} angles
+ * @param {number} minAngleSep - radians
+ * @returns {number[]} same length/order as `angles`, only the values change.
+ */
+export function spreadRingAngles(angles, minAngleSep) {
+  if (angles.length <= 1) return angles.slice();
+  const indexed = angles.map((angle, i) => ({ angle, i }));
+  indexed.sort((a, b) => a.angle - b.angle);
+  for (let k = 1; k < indexed.length; k += 1) {
+    if (indexed[k].angle - indexed[k - 1].angle < minAngleSep) {
+      indexed[k].angle = indexed[k - 1].angle + minAngleSep;
+    }
+  }
+  const first = indexed[0];
+  const last = indexed[indexed.length - 1];
+  const wrapGap = (first.angle + Math.PI * 2) - last.angle;
+  if (wrapGap < minAngleSep) {
+    // Even the two ends of the sorted sweep are still crowded — spreading
+    // sequentially can't fit everyone at the minimum separation, so fan
+    // the whole set out evenly across as much of the circle as it takes.
+    const span = Math.min(Math.PI * 2 - minAngleSep, minAngleSep * (indexed.length - 1));
+    const start = first.angle;
+    indexed.forEach((entry, k) => { entry.angle = start + (span * k) / (indexed.length - 1); });
+  }
+  const out = new Array(angles.length);
+  for (const entry of indexed) out[entry.i] = entry.angle;
+  return out;
+}
+
 /**
  * Install a `scene.postRender` listener that keeps every entity returned by
  * `getEntities()` clustered near the viewport's center (see
- * {@link clampToCenterCircle}) and clear of the app's currently-visible
- * panels, by adjusting each entity's `label.pixelOffset` in place every
- * frame. Cheap and idempotent per call; returns a remover.
+ * {@link clampToCenterCircle}), spread apart along that circle so
+ * neighboring flags don't overlap (see {@link spreadRingAngles}), and clear
+ * of the app's currently-visible panels, by adjusting each entity's
+ * `label.pixelOffset` in place every frame. Cheap and idempotent per call;
+ * returns a remover.
  * @param {Cesium.Viewer} viewer
  * @param {() => Array<Cesium.Entity>} getEntities - called fresh each frame, so a rebuilt flag set is picked up automatically.
  * @returns {() => void} call to uninstall.
@@ -226,13 +271,41 @@ export function installFlagAvoidance(viewer, getEntities) {
     if (!entities || !entities.length) return;
     Cesium.JulianDate.now(now);
     const canvas = viewer.scene.canvas;
+    const centerX = canvas.clientWidth / 2;
+    const centerY = canvas.clientHeight / 2;
+    const radius = Math.min(canvas.clientWidth, canvas.clientHeight) * CENTER_CIRCLE_RADIUS_FRACTION;
+
+    // Pass 1: project every flag and classify which ones will actually
+    // land on the ring (i.e. were outside the circle to begin with).
+    const placed = [];
     for (const entity of entities) {
       if (!entity.label || entity.isDestroyed?.()) continue;
       const pos = entity.position?.getValue(now);
       if (!pos) continue;
       const screen = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, pos);
       if (!screen) continue;
-      const clamped = clampToCenterCircle(screen.x, screen.y, canvas.clientWidth, canvas.clientHeight);
+      const dx = screen.x - centerX;
+      const dy = screen.y - centerY;
+      const dist = Math.hypot(dx, dy);
+      placed.push({ entity, screen, dist, angle: Math.atan2(dy, dx) });
+    }
+    if (!placed.length) return;
+
+    // Pass 2: spread the ring-bound ones apart by angle before computing
+    // their final screen targets.
+    const ringIdx = [];
+    const ringAngles = [];
+    placed.forEach((p, i) => { if (p.dist > radius) { ringIdx.push(i); ringAngles.push(p.angle); } });
+    if (ringAngles.length) {
+      const spread = spreadRingAngles(ringAngles, MIN_RING_LABEL_PX / radius);
+      ringIdx.forEach((i, k) => { placed[i].angle = spread[k]; });
+    }
+
+    for (const p of placed) {
+      const { entity, screen, dist, angle } = p;
+      const clamped = dist > radius
+        ? { x: centerX + Math.cos(angle) * radius, y: centerY + Math.sin(angle) * radius }
+        : { x: screen.x, y: screen.y };
       const avoid = computePanelAvoidanceOffset(clamped.x, clamped.y);
       const targetX = clamped.x + avoid.x;
       const targetY = clamped.y + avoid.y;
