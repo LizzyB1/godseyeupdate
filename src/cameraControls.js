@@ -75,7 +75,12 @@ import { computeHorizontalForward, signedRollFromLevel } from './cameraMath.js';
  * right to look right, drag left to look left, same non-inverted
  * mouselook pairing as the vertical axis. This claims the right mouse
  * button, so Cesium's native right-drag zoom is disabled in favor of it
- * (scroll-wheel zoom, and the R/F keys, still work).
+ * (scroll-wheel zoom, and the R/F keys, still work). Raw pointermove deltas
+ * are queued rather than applied instantly and eased out over several
+ * rendered frames (`_applyMouseLookSmoothing`) — irregular per-event
+ * mouse/OS timing would otherwise read as jerky rotation — which also
+ * leaves a brief, natural glide for a couple of frames after the button
+ * releases.
  *
  * Opposite-direction cancellation: holding both keys of an axis (forward
  * +backward, left+right, orbit left+right, or pitch up+down) at once
@@ -106,6 +111,14 @@ const MAX_FRAME_DT_S = 0.1; // clamp dt after a tab is backgrounded/throttled
 const PITCH_DRAG_RAD_PER_PX = Cesium.Math.toRadians(0.15); // right-drag vertical → pitch
 const YAW_DRAG_RAD_PER_PX = Cesium.Math.toRadians(0.15); // right-drag horizontal → yaw (look left/right in place)
 const MAX_DRAG_STEP_PX = 60; // clamp a single mousemove delta (e.g. after pointer warp/lag)
+// Right-drag look is queued (see _onPointerMove) and eased out over several
+// rendered frames instead of applied whole on each raw pointermove — see
+// _applyMouseLookSmoothing. Fraction of the remaining queued rotation
+// applied per frame: higher settles faster/snappier, lower glides longer.
+const MOUSELOOK_SMOOTHING = 0.35;
+// Once the queued rotation decays below this, snap it to exactly zero
+// instead of asymptotically crawling toward it forever.
+const MOUSELOOK_SETTLE_RAD = Cesium.Math.toRadians(0.02);
 /** Below this much roll deviation, don't bother re-snapping — avoids a setView() call every single frame from float noise. */
 const LEVEL_SNAP_EPSILON_RAD = Cesium.Math.toRadians(0.05);
 
@@ -450,6 +463,13 @@ export class CameraControls {
     this._dragPointerId = null;
     this._lastDragX = 0;
     this._lastDragY = 0;
+    // Queued-but-not-yet-applied look rotation, in radians, eased out over
+    // several rendered frames by `_applyMouseLookSmoothing` instead of
+    // being applied whole on each raw pointermove — see that method and
+    // `_onPointerMove`. Deliberately not cleared on drag-end, so a flick
+    // keeps gliding for a couple of frames after the button releases.
+    this._pendingPitchRad = 0;
+    this._pendingYawRad = 0;
     /** Cesium's own zoomEventTypes before we remove RIGHT_DRAG, for restore. */
     this._savedZoomEventTypes = null;
     /** Cesium's own enableRotate before we suspend it during a right-button drag. */
@@ -569,26 +589,17 @@ export class CameraControls {
     this._lastDragX = event.clientX;
     this._lastDragY = event.clientY;
 
-    const camera = this.viewer.camera;
-
-    // Vertical drag pitches (Y-axis tilt) — up = pitch up, matching the
-    // same convention as T and non-inverted FPS-style mouselook.
-    if (dy !== 0) {
-      const step = Math.abs(dy) * PITCH_DRAG_RAD_PER_PX;
-      if (dy < 0) camera.lookUp(step);
-      else camera.lookDown(step);
-    }
-
-    // Horizontal drag yaws the view left/right in place — a turn around the
-    // camera's own position, not an orbit around a ground point (that's
-    // still the dedicated 1/3/Q/E orbit keys). Same non-inverted pairing as
-    // pitch: drag right to look right. The per-frame roll-level snap
-    // (module doc comment) keeps the horizon flat regardless.
-    if (dx !== 0) {
-      const step = Math.abs(dx) * YAW_DRAG_RAD_PER_PX;
-      if (dx > 0) camera.lookRight(step);
-      else camera.lookLeft(step);
-    }
+    // Queued rather than applied immediately: raw pointermove events fire
+    // at an irregular, OS/mouse-dependent rate (bursty on some hardware),
+    // so rotating the camera directly off each one reads as jerky. Instead
+    // the delta is queued here (vertical = pitch, horizontal = yaw, same
+    // non-inverted conventions as before — up = pitch up, drag right =
+    // look right) and eased out across rendered frames by
+    // `_applyMouseLookSmoothing`, called every postRender from
+    // `_updateOrientation`. The per-frame roll-level snap (module doc
+    // comment) keeps the horizon flat regardless.
+    this._pendingPitchRad += dy * PITCH_DRAG_RAD_PER_PX;
+    this._pendingYawRad += dx * YAW_DRAG_RAD_PER_PX;
   }
 
   _onPointerUp(event) {
@@ -705,13 +716,46 @@ export class CameraControls {
   }
 
   /**
+   * Eases the queued right-drag rotation (see `_onPointerMove`) toward
+   * zero, applying only a fraction of what's left each rendered frame
+   * instead of the raw delta in one step. This is what actually smooths
+   * the look: it decouples how often the camera rotates (every frame, at
+   * a steady cadence) from how often — and how unevenly — pointermove
+   * events happen to fire, and it means a quick flick keeps gliding for a
+   * couple of frames after the button comes up rather than stopping dead.
+   */
+  _applyMouseLookSmoothing(camera) {
+    if (this._pendingPitchRad === 0 && this._pendingYawRad === 0) return;
+
+    if (Math.abs(this._pendingPitchRad) <= MOUSELOOK_SETTLE_RAD) {
+      this._pendingPitchRad = 0;
+    } else {
+      const step = this._pendingPitchRad * MOUSELOOK_SMOOTHING;
+      if (step < 0) camera.lookUp(-step);
+      else camera.lookDown(step);
+      this._pendingPitchRad -= step;
+    }
+
+    if (Math.abs(this._pendingYawRad) <= MOUSELOOK_SETTLE_RAD) {
+      this._pendingYawRad = 0;
+    } else {
+      const step = this._pendingYawRad * MOUSELOOK_SMOOTHING;
+      if (step > 0) camera.lookRight(step);
+      else camera.lookLeft(-step);
+      this._pendingYawRad -= step;
+    }
+  }
+
+  /**
    * Reads the camera's current heading/pitch/roll and updates the
    * orientation compass + text readout. Cheap DOM/CSS-transform writes
-   * only — safe to run on every `postRender`.
+   * only — safe to run on every `postRender`. Also drives the mouse-look
+   * smoothing above, on the same every-frame cadence.
    */
   _updateOrientation() {
     const camera = this.viewer.camera;
     if (!camera) return;
+    this._applyMouseLookSmoothing(camera);
     this._enforceLevelHorizon(camera);
 
     const box = this._box;
