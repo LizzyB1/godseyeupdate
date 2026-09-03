@@ -218,7 +218,7 @@ export class MapOverlayControls {
     flagRow.appendChild(flagEnable);
     flagRow.appendChild(document.createTextNode('Show elevation flags'));
     flagSection.appendChild(flagRow);
-    flagSection.appendChild(el('div', 'mapovl-hint', 'Big numbered flags on major contour lines, toward the west edge of the view. Needs "Show contour lines" on to have anything to flag. Stay clustered near the middle of the view, clear of any control panel in the way.'));
+    flagSection.appendChild(el('div', 'mapovl-hint', 'Big numbered flags sitting right on major contour lines, one per level, toward the west edge of the view. Needs "Show contour lines" on to have anything to flag. Nudged clear of any control panel in the way, otherwise exactly where the line is.'));
 
     const flagStepRow = el('label', 'mapovl-row');
     flagStepRow.appendChild(document.createTextNode('Label frequency'));

@@ -26,6 +26,30 @@ import * as Cesium from 'cesium';
 /** Vertical offset (meters) lifting a clamped point clear of the rendered mesh to avoid z-fighting — mirrors `data/traffic.js`'s `DOT_HEIGHT_OFFSET` precedent. */
 export const DEFAULT_HEIGHT_OFFSET = 1.5;
 
+/**
+ * Sanity bounds for a scene-sampled height (meters above the WGS84
+ * ellipsoid). Real terrain never leaves this range (Everest ~8,849 m, the
+ * Mariana Trench floor ~-10,935 m — both well inside it). `scene.sampleHeight`
+ * has been observed to occasionally return a huge, wildly wrong FINITE value
+ * — on the order of negative Earth-radius (~-6,340,000 m) — instead of
+ * `undefined`/NaN when its ray finds no real geometry to hit, most likely an
+ * internal ellipsoid-intersection fallback kicking in. That value sails
+ * straight through a plain `Number.isFinite` check, and one such outlier is
+ * enough to blow out an entire min/max height range for every consumer:
+ * this was the root cause of elevation contours going dark (every level
+ * lands in the bogus ~6,000 km-deep range, so none of the real terrain ever
+ * crosses one) while a cluster of flags with nonsensical "-6344490 m"
+ * labels appeared at the one rogue sample point. Rejecting anything outside
+ * this range and treating it the same as an unresolved sample (NaN) fixes
+ * every caller at the source instead of needing a per-consumer guard.
+ */
+const PLAUSIBLE_HEIGHT_MIN_M = -12000;
+const PLAUSIBLE_HEIGHT_MAX_M = 9500;
+
+function isPlausibleHeight(h) {
+  return Number.isFinite(h) && h >= PLAUSIBLE_HEIGHT_MIN_M && h <= PLAUSIBLE_HEIGHT_MAX_M;
+}
+
 /** True only in 3D scene mode with the depth-texture support `sampleHeight` needs. */
 export function sceneHeightSupported(scene) {
   return Boolean(scene) && scene.mode === Cesium.SceneMode.SCENE3D && Boolean(scene.sampleHeightSupported);
@@ -46,7 +70,7 @@ export function sampleSceneHeights(scene, lonLatPairs) {
     try {
       const carto = Cesium.Cartographic.fromDegrees(lon, lat);
       const h = scene.sampleHeight(carto);
-      return Number.isFinite(h) ? h : NaN;
+      return isPlausibleHeight(h) ? h : NaN;
     } catch {
       return NaN;
     }

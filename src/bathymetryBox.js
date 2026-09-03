@@ -138,7 +138,7 @@ export class BathymetryBox {
     section.appendChild(el(
       'div',
       'mapovl-hint',
-      'Isobaths and depth readouts: GEBCO grid via opentopodata.org (public, no key, rate-limited — cached once looked up). Depth flags need "Show depth contours" on, and stay clustered near the middle of the view, clear of any control panel in the way.',
+      'Isobaths and depth readouts: GEBCO grid via opentopodata.org (public, no key, rate-limited — cached once looked up). Depth flags need "Show depth contours" on, sit right on their contour line, and nudge clear of any control panel in the way.',
     ));
 
     if (BATHYMETRY_DISABLED) {

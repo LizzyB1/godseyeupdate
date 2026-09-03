@@ -63,12 +63,12 @@ export class AboutBox {
 
     body.appendChild(section('BATHYMETRY', [
       'Isobaths and depth readouts: GEBCO grid via opentopodata.org (public, no key, rate-limited — cached once looked up).',
-      'Depth flags need "Show depth contours" on, and stay clustered near the middle of the view, clear of any control panel in the way.',
+      'Depth flags need "Show depth contours" on, sit right on their contour line, and nudge clear of any control panel in the way.',
     ]));
 
     body.appendChild(section('MAP OVERLAYS', [
       'Height relief exaggeration makes hills/valleys more obvious — 1.0× is true scale.',
-      'Contour flags need "Show contour lines" on to have anything to flag, and stay clustered near the middle of the view, clear of any control panel in the way.',
+      'Contour flags need "Show contour lines" on to have anything to flag; each one sits right on its line and nudges clear of any control panel in the way.',
       'Grid value labels show large lat/long labels on whichever grid lines are currently on screen.',
     ]));
 
