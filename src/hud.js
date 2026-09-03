@@ -60,13 +60,20 @@ const NEARBY_POINTS = Object.values(CITY_POIS)
 /**
  * Full-screen intelligence HUD overlay rendered on top of the Cesium canvas.
  *
- * The rolling semantic summary line, and the MGRS/lat-lon/GSD/NIIRS/ALT/
- * SUN/AIS/COLL/ONA/bottom-line readouts, are all computed and written here,
- * but rendered in `hudReadoutsBox.js`'s standalone "SUMMARY" section/box —
- * see that module and the file-level comment above. All values derive from
- * the live camera position and update on independent timer cadences. Only
- * the static BAND/BITS/LVL edge strip still renders directly inside this
- * overlay's own corner bracket.
+ * The rolling semantic summary line and the MGRS/lat-lon/GSD/NIIRS/ALT/
+ * SUN/AIS/COLL/ONA readouts are all computed and written here, but
+ * rendered in `hudReadoutsBox.js`'s standalone box (the numeric readouts)
+ * and `summaryBox.js`'s standalone box (the summary sentence + timestamp)
+ * — see those modules and the file-level comment above. All values derive
+ * from the live camera position and update on independent timer cadences.
+ * Only the static BAND/BITS/LVL edge strip still renders directly inside
+ * this overlay's own corner bracket.
+ *
+ * The camera's own ground subpoint — the same lon/lat the MGRS/lat-lon
+ * readouts are computed from — is also marked on the map itself with a
+ * small ring reticle (`_updateGroundPointer`), so a viewer can see exactly
+ * where those readouts refer to rather than reading numbers with nothing
+ * to anchor them to.
  */
 export class IntelHUD {
   /**
@@ -111,6 +118,12 @@ export class IntelHUD {
     // session, so this flips once — and both altitude readouts have to move
     // together when it does (see the repaint in _updateCameraData).
     this._geoidCorrectionApplied = false;
+    // Ring-reticle entity marking the camera's own ground subpoint on the
+    // map itself — see `_updateGroundPointer`. Created lazily on the first
+    // telemetry tick with a real `viewer.entities` (some test harnesses
+    // drive `_updateCameraData()` against a minimal fake viewer with no
+    // entity collection at all, so this stays null and is skipped there).
+    this._groundPointerEntity = null;
     this._onCameraMoveEnd = () => {
       this._markSummaryDirty();
       // The 250 ms telemetry timer and 15 s semantic-summary timer must not
@@ -144,12 +157,12 @@ export class IntelHUD {
    * (not relocated). The mode label ("NORMAL"/"CRT"/...) was real but
    * redundant with the "ACTIVE STYLE" indicator already on screen, so it's
    * gone too — dropped from both this corner and the composed summary
-   * line (see `_composeSummary`). The rolling summary line WAS a real live
-   * value, so — like the timestamp before it — it moved to
-   * `hudReadoutsBox.js`'s own "SUMMARY" section instead of being deleted;
-   * see the file-level comment. `_updateCameraData`/`_startTimers` still
-   * find and write MGRS/lat-lon/GSD/NIIRS/ALT/SUN/AIS/COLL/ONA/bottom-
-   * line/timestamp/summary by id regardless of which module created them.
+   * line (see `_composeSummary`). The rolling summary line and timestamp
+   * WERE real live values, so they moved to `summaryBox.js`'s own box
+   * instead of being deleted; see the file-level comment.
+   * `_updateCameraData`/`_startTimers` still find and write
+   * MGRS/lat-lon/GSD/NIIRS/ALT/SUN/AIS/COLL/ONA/timestamp/summary by id
+   * regardless of which module created them.
    */
   _buildDOM() {
     this._el = document.getElementById('intel-hud');
@@ -249,14 +262,12 @@ export class IntelHUD {
     const altM = cartographic.height;
     const latDMS = this._toDMS(latDeg, 'lat');
     const lonDMS = this._toDMS(lonDeg, 'lon');
-    let mgrsLabel = '---';
 
     // MGRS
     try {
       const mgrsStr = toMGRS([lonDeg, latDeg], 4); // 4 = 10m precision
       // Format: 18SUJ23370716 → 18S UJ 2337 0716
       const formatted = this._formatMGRS(mgrsStr);
-      mgrsLabel = formatted;
       const el = document.getElementById('hud-mgrs');
       if (el) el.textContent = `MGRS: ${formatted}`;
     } catch {
@@ -264,13 +275,20 @@ export class IntelHUD {
       if (el) el.textContent = 'MGRS: ---';
     }
 
-    // Lat/Lon DMS
+    // Lat/Lon DMS. (There used to also be a "#hud-bottom-line" readout
+    // here combining MGRS + this same lat/lon into one more line — a
+    // literal duplicate of the two readouts directly above it, removed
+    // outright rather than kept in sync. The map pointer below is the
+    // replacement way to correlate this data with a place, not another
+    // text restatement of it.)
     const llEl = document.getElementById('hud-latlon');
     if (llEl) llEl.textContent = `${latDMS} ${lonDMS}`;
-    const bottomEl = document.getElementById('hud-bottom-line');
-    if (bottomEl) {
-      bottomEl.textContent = `MGRS: ${mgrsLabel}  LAT: ${latDMS}  LON: ${lonDMS}`;
-    }
+
+    // Map pointer: a ring reticle at this same lon/lat, clamped to the
+    // ground, so the MGRS/lat-lon readouts above have a visible anchor on
+    // the map itself. Skipped when there's no real entity collection to
+    // add to (see the constructor comment).
+    if (this.viewer.entities) this._updateGroundPointer(lonDeg, latDeg);
 
     // GSD (Ground Sample Distance): approximate resolution in meters per pixel
     // derived from camera altitude. NIIRS (National Imagery Interpretability
@@ -344,6 +362,39 @@ export class IntelHUD {
       this._geoidCorrectionApplied = geoidCorrectionApplied;
       this._markSummaryDirty();
       this._setSummaryText(this._composeSummary(), false);
+    }
+  }
+
+  /**
+   * Place or move a small ring reticle on the map at the camera's own
+   * ground subpoint — the same lon/lat `_updateCameraData` just fed into
+   * `#hud-mgrs`/`#hud-latlon` — clamped to the terrain so it always sits on
+   * the ground regardless of camera altitude. Deliberately a hollow ring
+   * rather than a filled dot, and a different color, so it reads as "this
+   * is what the HUD numbers refer to" and is never mistaken for
+   * `mapOverlays.js`'s filled cursor pin (a point the viewer clicked to
+   * place, not one the camera is tracking).
+   * @param {number} lonDeg - Camera subpoint longitude in decimal degrees.
+   * @param {number} latDeg - Camera subpoint latitude in decimal degrees.
+   */
+  _updateGroundPointer(lonDeg, latDeg) {
+    const position = Cesium.Cartesian3.fromDegrees(lonDeg, latDeg);
+    if (!this._groundPointerEntity) {
+      this._groundPointerEntity = this.viewer.entities.add({
+        id: 'hud-ground-pointer',
+        position,
+        point: {
+          pixelSize: 16,
+          color: Cesium.Color.TRANSPARENT,
+          outlineColor: Cesium.Color.fromCssColorString('#39ff8f'),
+          outlineWidth: 3,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        show: this._visible,
+      });
+    } else {
+      this._groundPointerEntity.position = position;
     }
   }
 
@@ -695,6 +746,7 @@ export class IntelHUD {
   show() {
     this._visible = true;
     if (this._el) this._el.classList.add('active');
+    if (this._groundPointerEntity) this._groundPointerEntity.show = true;
     this._updateCameraData(); // immediate update
     this._markSummaryDirty();
     void this._updateSummary(false, true);
@@ -704,6 +756,7 @@ export class IntelHUD {
   hide() {
     this._visible = false;
     if (this._el) this._el.classList.remove('active');
+    if (this._groundPointerEntity) this._groundPointerEntity.show = false;
   }
 
   /** Toggle HUD visibility and disable auto-mode (user override). */
@@ -791,5 +844,9 @@ export class IntelHUD {
     this.viewer.camera.moveEnd.removeEventListener(this._onCameraMoveEnd);
     this._dataManagerUnsubscribe?.();
     this._summaryRequest?.abort();
+    if (this._groundPointerEntity) {
+      this.viewer.entities.remove(this._groundPointerEntity);
+      this._groundPointerEntity = null;
+    }
   }
 }

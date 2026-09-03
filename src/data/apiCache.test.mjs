@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { estimateBytes, planEviction, namespacedKey, MAX_CACHE_BYTES } from './apiCache.js';
+import { estimateBytes, planEviction, namespacedKey, formatBytes, MAX_CACHE_BYTES } from './apiCache.js';
 
 test('MAX_CACHE_BYTES is the required 5 GB budget', () => {
   assert.equal(MAX_CACHE_BYTES, 5 * 1024 * 1024 * 1024);
@@ -54,4 +54,22 @@ test('planEviction with no existing entries just reports the incoming size', () 
   const { toEvictSeqs, totalBytesAfter } = planEviction([], 200, 1000);
   assert.deepEqual(toEvictSeqs, []);
   assert.equal(totalBytesAfter, 200);
+});
+
+test('formatBytes stays in bytes below 1 KB', () => {
+  assert.equal(formatBytes(0), '0 B');
+  assert.equal(formatBytes(1023), '1023 B');
+});
+
+test('formatBytes picks the largest unit under 1024 of itself', () => {
+  assert.equal(formatBytes(1024), '1.0 KB');
+  assert.equal(formatBytes(1536), '1.5 KB');
+  assert.equal(formatBytes(1024 * 1024), '1.0 MB');
+  assert.equal(formatBytes(5 * 1024 * 1024 * 1024), '5.0 GB');
+});
+
+test('formatBytes tolerates negative/non-finite input rather than printing garbage', () => {
+  assert.equal(formatBytes(-5), '0 B');
+  assert.equal(formatBytes(NaN), '0 B');
+  assert.equal(formatBytes(undefined), '0 B');
 });

@@ -67,6 +67,7 @@ export class AboutBox {
     ]));
 
     body.appendChild(section('MAP OVERLAYS', [
+      'Chart datum (sea level) is a translucent plane at 0m elevation spanning the current view — on by default — so how much of what\'s on screen sits above or below sea level reads at a glance, no numbers needed.',
       'Height relief exaggeration makes hills/valleys more obvious — 1.0× is true scale.',
       'Line smoothing rounds off the raw computed contour line in steps — 0 is the exact line, higher numbers trade a little precision for a visibly smoother curve.',
       'Contour flags need "Show contour lines" on to have anything to flag; each level gets one flag per edge toggled on (W/E/N/S), nudged clear of any control panel in the way.',
@@ -81,6 +82,10 @@ export class AboutBox {
 
     body.appendChild(section('GPS TRACKS', [
       'Accepts .gpx, .txt, .log, and .nmea files — either already-converted GPX tracks or raw NMEA logger dumps, parsed entirely in the browser (nothing is uploaded anywhere).',
+    ]));
+
+    body.appendChild(section('DATA CACHE', [
+      'Reverse-geocoded addresses and bathymetry depth samples are cached durably (IndexedDB, 5GB budget) so revisiting the same spot doesn\'t re-fetch it. The Data Cache box shows total usage and lets you flush one type or everything.',
     ]));
 
     body.appendChild(section('CONTOUR LINE COLORS', [

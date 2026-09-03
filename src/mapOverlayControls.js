@@ -143,6 +143,23 @@ export class MapOverlayControls {
     intervalSelect.addEventListener('change', () => this.engine.setContourMajorSpacing(Number(intervalSelect.value)));
     minorEnable.addEventListener('change', () => this.engine.setContourMinorEnabled(minorEnable.checked));
 
+    // ── Chart datum (sea level) ─────────────────────────────────────────
+    // Independent of "Show contour lines" above — a translucent reference
+    // plane at height 0, not another contour level, so it draws (or
+    // doesn't) regardless of that toggle. On by default; see
+    // data/mapOverlays.js's DEFAULT_STATE.chartDatumEnabled comment.
+    const chartDatumSection = el('div', 'mapovl-section');
+    chartDatumSection.appendChild(el('div', 'mapovl-section-title', 'CHART DATUM (SEA LEVEL)'));
+    const chartDatumRow = el('label', 'mapovl-row');
+    const chartDatumEnable = document.createElement('input');
+    chartDatumEnable.type = 'checkbox';
+    chartDatumEnable.checked = this.engine.state.chartDatumEnabled;
+    chartDatumRow.appendChild(chartDatumEnable);
+    chartDatumRow.appendChild(document.createTextNode('Show sea level plane'));
+    chartDatumSection.appendChild(chartDatumRow);
+    body.appendChild(chartDatumSection);
+    chartDatumEnable.addEventListener('change', () => this.engine.setChartDatumEnabled(chartDatumEnable.checked));
+
     // ── Vertical exaggeration ────────────────────────────────────────
     // A fixed 3-option button group, not a slider — only 1.0×/1.5×/2.0× are
     // valid, kept in lockstep with `data/mapOverlays.js`'s own snapping.
@@ -325,6 +342,7 @@ export class MapOverlayControls {
       minorEnable.checked = false;
       precisionInput.value = String(this.engine.state.contourSmoothing);
       ringLabelsEnable.checked = this.engine.state.ringLabelsEnabled;
+      chartDatumEnable.checked = this.engine.state.chartDatumEnabled;
       markActiveExaggeration(this.engine.state.verticalExaggeration);
       gridEnable.checked = false;
       gridSpacingSelect.value = String(this.engine.state.gridSpacingDeg);

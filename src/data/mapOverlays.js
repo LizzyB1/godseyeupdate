@@ -9,8 +9,9 @@ import { LAND_CONTOUR_PALETTE, paletteColorHex } from './contourColors.js';
 
 /**
  * @file Cesium-facing engine behind the "Map Overlays" control box: elevation
- * contour lines, vertical (height-relief) exaggeration, a lat/lon graticule,
- * and a click-to-place coordinate cursor with reverse geocoding + a
+ * contour lines, a toggleable chart-datum (sea level) reference plane,
+ * vertical (height-relief) exaggeration, a lat/lon graticule, and a
+ * click-to-place coordinate cursor with reverse geocoding + a
  * viewport-screenshot capture. Kept as one module since all of it shares the
  * same height plumbing and the same control box.
  *
@@ -109,6 +110,14 @@ export const DEFAULT_STATE = Object.freeze({
   // buildRingLabels. On by default since it's a direct legibility win with
   // no clutter cost when there's nothing closed in view.
   ringLabelsEnabled: true,
+  // "Chart datum" in marine-chart terms, colloquially sea level: a
+  // translucent reference plane at ellipsoid height 0 spanning the current
+  // view, so a viewer can see at a glance how much of what's on screen
+  // sits above or below it. Unlike the contour lines above, it's pure
+  // geometry off the current view rectangle — no scene-height sampling —
+  // so it's cheap enough to leave on by default; see
+  // `_recomputeChartDatum`.
+  chartDatumEnabled: true,
 });
 
 /** Font for grid/contour line value labels — deliberately large, per the
@@ -141,6 +150,7 @@ export class MapOverlaysEngine {
     this._contourPrimitive = null;
     this._gridPrimitive = null;
     this._gridLabelPrimitive = null;
+    this._chartDatumEntity = null;
     this._recomputeTimer = null;
     this._contourStatus = ''; // status line shown in the UI
     this._computeToken = 0;
@@ -184,6 +194,7 @@ export class MapOverlaysEngine {
     this.setVerticalExaggeration(this.state.verticalExaggeration);
     if (this.state.contoursEnabled) this._scheduleRecompute();
     if (this.state.gridEnabled) this._recomputeGrid();
+    if (this.state.chartDatumEnabled) this._recomputeChartDatum();
   }
 
   // ── persistence ──────────────────────────────────────────────────────
@@ -265,6 +276,54 @@ export class MapOverlaysEngine {
     this.state.contourSmoothing = Cesium.Math.clamp(Math.round(Number(level)) || 0, 0, 4);
     this._persist();
     if (this.state.contoursEnabled) this._scheduleRecompute();
+  }
+
+  // ── chart datum (sea level) plane ───────────────────────────────────
+  /**
+   * Toggle the translucent chart-datum reference plane — see
+   * `DEFAULT_STATE.chartDatumEnabled`'s comment for what it's for.
+   * Independent of `contoursEnabled`: it draws (or doesn't) regardless of
+   * whether the elevation contour lines are on.
+   */
+  setChartDatumEnabled(enabled) {
+    this.state.chartDatumEnabled = Boolean(enabled);
+    this._persist();
+    if (this.state.chartDatumEnabled) this._recomputeChartDatum();
+    else this._clearChartDatum();
+  }
+
+  _clearChartDatum() {
+    if (this._chartDatumEntity) {
+      this.viewer.entities.remove(this._chartDatumEntity);
+      this._chartDatumEntity = null;
+    }
+  }
+
+  /**
+   * Redraw the chart-datum plane to cover exactly the current view
+   * rectangle. Purely geometric — four corners off
+   * `camera.computeViewRectangle()` — so unlike `_recomputeContours` this
+   * never samples the scene and never needs debouncing; it's cheap enough
+   * to run directly on every camera settle (see `_onCameraMoveEnd`).
+   */
+  _recomputeChartDatum() {
+    if (!this.state.chartDatumEnabled) return;
+    const rect = this.viewer.camera.computeViewRectangle();
+    if (!rect) return;
+    if (!this._chartDatumEntity) {
+      this._chartDatumEntity = this.viewer.entities.add({
+        id: 'map-overlays-chart-datum',
+        rectangle: {
+          coordinates: rect,
+          height: 0,
+          material: Cesium.Color.fromCssColorString('#1e90ff').withAlpha(0.14),
+          outline: true,
+          outlineColor: Cesium.Color.fromCssColorString('#66c8ff').withAlpha(0.6),
+        },
+      });
+    } else {
+      this._chartDatumEntity.rectangle.coordinates = rect;
+    }
   }
 
   // ── grid line value labels ──────────────────────────────────────────
@@ -698,6 +757,7 @@ export class MapOverlaysEngine {
   _onCameraMoveEnd() {
     if (this.state.contoursEnabled) this._scheduleRecompute();
     if (this.state.gridEnabled) this._recomputeGrid();
+    if (this.state.chartDatumEnabled) this._recomputeChartDatum();
   }
 
   // ── cursor / pin tool ────────────────────────────────────────────────
@@ -881,6 +941,8 @@ export class MapOverlaysEngine {
     this._applyVerticalExaggeration();
     this._clearContours();
     this._clearGrid();
+    this._clearChartDatum();
+    if (this.state.chartDatumEnabled) this._recomputeChartDatum();
     this.clearCursor();
     this.setCursorActive(false);
   }
@@ -893,6 +955,7 @@ export class MapOverlaysEngine {
     this.viewer.dataSources.remove(this._contourFlagDataSource, true);
     this.viewer.dataSources.remove(this._contourRingLabelDataSource, true);
     this._clearGrid();
+    this._clearChartDatum();
     this._uninstallCursorHandler();
     this.clearCursor();
   }

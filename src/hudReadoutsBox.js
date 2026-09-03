@@ -1,20 +1,25 @@
 import { buildMiniBox } from './miniBox.js';
 
 /**
- * @file Standalone "HUD Readouts" mini control box: the rolling semantic
- * SUMMARY line plus the individual intelligence-HUD data readouts — MGRS,
- * lat/lon, GSD/NIIRS, ALT/SUN, AIS, COLL, ONA, the combined bottom line,
- * and the UTC timestamp — that used to be baked uncontrolled into
- * `#intel-hud`'s corner brackets (see `hud.js`). They're pure data sinks:
- * `hud.js`'s `_updateCameraData()`/`_startTimers()`/`_setSummaryText()`
- * and `data/aisLiveVessels.js` write into them by element id exactly as
- * before — this module just owns where those elements physically live (in
- * their own movable/resizable/collapsible box, with a copy-to-clipboard
- * button) instead of fixed inside the cinematic HUD overlay. (The
- * classification banner, mode label, mission/sensor-ID line, REC blink
- * dot, and ORB/PASS orbital line were pure decoration/redundant with the
- * "ACTIVE STYLE" indicator elsewhere on screen — those were deleted
- * outright, not relocated; see `hud.js`'s `_buildDOM` comment.)
+ * @file Standalone "HUD Readouts" mini control box: the individual
+ * intelligence-HUD data readouts — MGRS, lat/lon, GSD/NIIRS, ALT/SUN, AIS,
+ * COLL, and ONA — that used to be baked uncontrolled into `#intel-hud`'s
+ * corner brackets (see `hud.js`). They're pure data sinks: `hud.js`'s
+ * `_updateCameraData()` and `data/aisLiveVessels.js` write into them by
+ * element id exactly as before — this module just owns where those
+ * elements physically live (in their own movable/resizable/collapsible
+ * box, with a copy-to-clipboard button) instead of fixed inside the
+ * cinematic HUD overlay. (The classification banner, mode label,
+ * mission/sensor-ID line, REC blink dot, and ORB/PASS orbital line were
+ * pure decoration/redundant with the "ACTIVE STYLE" indicator elsewhere on
+ * screen — those were deleted outright, not relocated; see `hud.js`'s
+ * `_buildDOM` comment. The rolling semantic SUMMARY sentence and the UTC
+ * timestamp now live in their own standalone box — see `summaryBox.js`.
+ * The old combined "bottom line" row — a literal duplicate of the MGRS and
+ * lat/lon rows already above it — was removed outright rather than moved;
+ * `hud.js` now marks that same coordinate directly on the map instead,
+ * with a ring reticle at the camera's ground subpoint — see
+ * `hud.js#_updateGroundPointer`.)
  *
  * These readouts only update while `hud.js`'s own visibility flag is on
  * (the Intel HUD toggle in the Display panel — see `IntelHUD#show`/
@@ -36,7 +41,6 @@ import { buildMiniBox } from './miniBox.js';
  * to keep writing into these by id.
  */
 const READOUTS = [
-  { id: 'hud-timestamp', text: '2026-01-01 00:00:00Z' },
   { id: 'hud-mgrs', text: 'MGRS: ---' },
   { id: 'hud-latlon', text: '--°--\'--"N ---°--\'--"W' },
   { id: 'hud-gsd', text: 'GSD: --m  NIIRS: --' },
@@ -44,7 +48,6 @@ const READOUTS = [
   { id: 'hud-ais-vessel', text: 'AIS: --', className: 'hud-ais-vessel' },
   { id: 'hud-coll', text: 'COLL: --:--:--Z' },
   { id: 'hud-ona', text: 'ONA: --°' },
-  { id: 'hud-bottom-line', text: 'LAT: --  LON: --  MGRS: ---' },
 ];
 
 export class HudReadoutsBox {
@@ -57,37 +60,17 @@ export class HudReadoutsBox {
       idPrefix: 'hudread',
       storagePrefix: 'godsEyeView.hudReadoutsBox.',
       title: 'HUD READOUTS',
-      ariaLabel: 'Intelligence HUD data readouts: MGRS, lat/long, sensor metrics, and timestamps',
+      ariaLabel: 'Intelligence HUD data readouts: MGRS, lat/long, and sensor metrics',
       defaultWidth: 260,
-      defaultHeight: 300,
+      defaultHeight: 260,
       minWidth: 200,
       maxWidth: 420,
-      minHeight: 180,
+      minHeight: 150,
       maxHeight: 560,
       anchor: { left: '16px', top: '16px' },
     });
     this._box = box;
     const body = box.body;
-
-    // The rolling semantic summary line, formerly its own bracket floating
-    // over the map in hud.js — see the file-level comment. Kept as its
-    // own labeled section, above the individual readouts, since it reads
-    // as a sentence rather than a row of the others' short data chips.
-    const summarySection = document.createElement('div');
-    summarySection.className = 'hudread-summary-section';
-    const summaryLabel = document.createElement('div');
-    summaryLabel.id = 'hud-summary-label';
-    summaryLabel.className = 'hudread-summary-label';
-    summaryLabel.textContent = 'SUMMARY';
-    const summary = document.createElement('div');
-    summary.id = 'hud-summary';
-    summary.className = 'hudread-summary';
-    summary.textContent = 'Awaiting telemetry...';
-    summarySection.appendChild(summaryLabel);
-    summarySection.appendChild(summary);
-    body.appendChild(summarySection);
-    this._summaryLabel = summaryLabel;
-    this._summary = summary;
 
     const section = document.createElement('div');
     section.className = 'hudread-section';
@@ -116,7 +99,7 @@ export class HudReadoutsBox {
   }
 
   async _copy(btn) {
-    const lines = [this._summary?.textContent || '', ...READOUTS.map(({ id }) => this._rows[id]?.textContent || '')];
+    const lines = READOUTS.map(({ id }) => this._rows[id]?.textContent || '');
     const text = lines.join('\n');
     try {
       await navigator.clipboard.writeText(text);

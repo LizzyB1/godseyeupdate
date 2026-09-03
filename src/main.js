@@ -40,6 +40,7 @@ import { initCoordinatesBox } from './coordinatesBox.js';
 import { initPanelRestoreTray } from './panelRestoreTray.js';
 import { initAboutBox } from './aboutBox.js';
 import { initStatusBox } from './statusBox.js';
+import { initCacheControllerBox } from './cacheControllerBox.js';
 import { initBathymetry } from './data/bathymetry.js';
 import { initBathymetryBox } from './bathymetryBox.js';
 import { resolveApiKey } from './apiKeys.js';
@@ -382,6 +383,13 @@ async function init() {
     // to be built after all three exist. See src/statusBox.js.
     const statusBox = initStatusBox({ dataManager, bathymetry, mapOverlays });
 
+    // Admin view onto the durable cross-session cache (reverse-geocoded
+    // addresses, bathymetry depth samples) — total usage, a per-type
+    // breakdown, and per-type/whole-cache flush. See
+    // src/cacheControllerBox.js and data/apiCache.js's new
+    // listStores()/clearStore().
+    const cacheControllerBox = initCacheControllerBox();
+
     // GUI overhaul: lets the DISPLAY, DATA LAYERS, CCTV, SCENES, and CONTEXT
     // panels be dragged free of their managed stacks — see src/panelDrag.js
     // for why the command-dock hover trays (Visual Presets/Location) are
@@ -485,6 +493,7 @@ async function init() {
       panelRestoreTray,
       aboutBox,
       statusBox,
+      cacheControllerBox,
       panelDrag,
       getRenderGovernorDiagnostics,
       requestRender: governorRequestRender,

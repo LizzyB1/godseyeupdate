@@ -1,12 +1,26 @@
 /**
  * @file Durable, cross-session client cache for slow-changing API results —
- * reverse-geocoded addresses (`data/mapOverlays.js`) so far — backed by
- * IndexedDB (`localStorage`'s ~5-10MB cap is far too small for a useful
- * geographic cache). Hard-capped at `MAX_CACHE_BYTES` (5 GB) with FIFO
- * eviction: once the budget is exceeded, the oldest-WRITTEN entry goes
- * first, tracked via a monotonic write sequence number rather than
- * last-access time — a true first-in-first-out policy, not LRU, per the
- * operator's explicit request.
+ * reverse-geocoded addresses (`data/mapOverlays.js`) and bathymetry depth
+ * lookups (`data/bathymetry.js`) so far — backed by IndexedDB
+ * (`localStorage`'s ~5-10MB cap is far too small for a useful geographic
+ * cache). Hard-capped at `MAX_CACHE_BYTES` (5 GB) with FIFO eviction: once
+ * the budget is exceeded, the oldest-WRITTEN entry goes first, tracked via
+ * a monotonic write sequence number rather than last-access time — a true
+ * first-in-first-out policy, not LRU, per the operator's explicit request.
+ *
+ * Deliberately NOT a place for this app's scene-derived heights or the
+ * contour lines computed from them (`data/sceneHeight.js`,
+ * `data/mapOverlays.js`): those exist specifically to read "what the scene
+ * is rendering right now," which changes as 3D tiles stream in at
+ * different levels of detail — durably caching them would reintroduce the
+ * exact off-the-rendered-ground mismatch bug `sceneHeight.js`'s own
+ * file-level comment documents fixing. Only genuinely slow-changing,
+ * network-fetched results belong here.
+ *
+ * `listStores()`/`clearStore()` give a cache-controller UI
+ * (`cacheControllerBox.js`) a per-logical-store breakdown and per-type
+ * flush, on top of the whole-cache `stats()`/`clear()` every consumer
+ * already had.
  *
  * The IndexedDB plumbing itself isn't unit-testable outside a browser, so
  * it's kept to thin get/put/evict methods around two pure, exported,
@@ -67,6 +81,26 @@ export function planEviction(orderedEntries, incomingBytes, maxBytes) {
     i += 1;
   }
   return { toEvictSeqs, totalBytesAfter: Math.max(0, total) };
+}
+
+/**
+ * Human-readable size string for a byte count — B/KB/MB/GB, one decimal
+ * place above B. Pure/exported so the cache-controller UI's formatting is
+ * unit-testable the same way `estimateBytes`/`planEviction` are.
+ * @param {number} bytes
+ * @returns {string}
+ */
+export function formatBytes(bytes) {
+  const n = Number.isFinite(bytes) ? Math.max(0, bytes) : 0;
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = n / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 function hasIndexedDb() {
@@ -212,6 +246,79 @@ export class ApiCache {
       const tx = db.transaction([ENTRIES_STORE, META_STORE], 'readwrite');
       tx.objectStore(ENTRIES_STORE).clear();
       tx.objectStore(META_STORE).clear();
+      await txDone(tx);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Per-logical-store breakdown of what's currently cached — item count and
+   * total bytes for every `storeName` that has at least one entry, largest
+   * first. Walks every entry once via a cursor: fine for the "how much, of
+   * what" summary a cache-controller UI needs on open/refresh, not meant
+   * for a hot path. Best-effort — returns `[]` on any failure.
+   * @returns {Promise<Array<{store:string, count:number, bytes:number}>>}
+   */
+  async listStores() {
+    try {
+      const db = await this._db();
+      const tx = db.transaction(ENTRIES_STORE, 'readonly');
+      const totals = new Map(); // storeName -> {count, bytes}
+      await new Promise((resolve, reject) => {
+        const cursorReq = tx.objectStore(ENTRIES_STORE).openCursor();
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (!cursor) { resolve(); return; }
+          const row = cursor.value;
+          const entry = totals.get(row.store) || { count: 0, bytes: 0 };
+          entry.count += 1;
+          entry.bytes += row.bytes || 0;
+          totals.set(row.store, entry);
+          cursor.continue();
+        };
+        cursorReq.onerror = () => reject(cursorReq.error);
+      });
+      return [...totals.entries()]
+        .map(([store, { count, bytes }]) => ({ store, count, bytes }))
+        .sort((a, b) => b.bytes - a.bytes);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Wipe every entry belonging to ONE logical store, leaving every other
+   * store's entries untouched — the per-type flush a cache-controller UI
+   * needs, as opposed to `clear()`'s wipe-everything. Best-effort.
+   * @param {string} storeName
+   * @returns {Promise<boolean>}
+   */
+  async clearStore(storeName) {
+    try {
+      const db = await this._db();
+      const tx = db.transaction([ENTRIES_STORE, META_STORE], 'readwrite');
+      const entries = tx.objectStore(ENTRIES_STORE);
+      const meta = tx.objectStore(META_STORE);
+      let removedBytes = 0;
+      await new Promise((resolve, reject) => {
+        const cursorReq = entries.openCursor();
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (!cursor) { resolve(); return; }
+          if (cursor.value.store === storeName) {
+            removedBytes += cursor.value.bytes || 0;
+            cursor.delete();
+          }
+          cursor.continue();
+        };
+        cursorReq.onerror = () => reject(cursorReq.error);
+      });
+      if (removedBytes > 0) {
+        const metaRow = (await reqToPromise(meta.get(META_KEY))) || { id: META_KEY, seq: 0, totalBytes: 0 };
+        meta.put({ ...metaRow, totalBytes: Math.max(0, (metaRow.totalBytes || 0) - removedBytes) });
+      }
       await txDone(tx);
       return true;
     } catch {

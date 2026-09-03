@@ -11,6 +11,7 @@ import {
 } from './cockpitTracking.js';
 import { IntelHUD } from './hud.js';
 import { initHudReadoutsBox } from './hudReadoutsBox.js';
+import { initSummaryBox } from './summaryBox.js';
 import { applyStoredHiddenState, hidePanel } from './panelVisibility.js';
 import { ShareLinkManager } from './sharelink.js';
 import {
@@ -2306,9 +2307,12 @@ export class StyleManager {
     // Intel HUD
     this.hud = new IntelHUD(viewer);
     // Its individual data readouts (MGRS, lat/lon, GSD/NIIRS, ALT/SUN, AIS,
-    // COLL, ONA, bottom line) live in their own standalone movable box —
-    // see hudReadoutsBox.js's file-level comment for why.
+    // COLL, ONA) live in their own standalone movable box — see
+    // hudReadoutsBox.js's file-level comment for why. The rolling
+    // semantic summary sentence + timestamp live in a separate small box
+    // of their own — see summaryBox.js.
     this.hudReadouts = initHudReadoutsBox();
+    this.summaryBox = initSummaryBox();
     this._cockpitVisionMode = 'optical';
     this._cockpitVisionRestore = null;
     this._cockpitPanelRestore = null;
