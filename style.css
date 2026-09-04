@@ -9138,8 +9138,8 @@ body.scene-playback-mode #first-run-launcher {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
-  padding: 10px 8px 12px;
+  gap: 4px;
+  padding: 8px 6px 10px;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -9160,6 +9160,10 @@ body.scene-playback-mode #first-run-launcher {
    a fixed center index, so the whole block reads as one level line of
    travel instead of a circle to interpret. Nothing here is filled — the
    marks and text sit straight on the box's own glass. */
+/* Pitch-only now — the bearing tape/heading readout that used to live here
+   moved to the Compass box (compassbox-orient/-tape/-heading in
+   style.css's Compass section) so all heading/orientation info lives in
+   one place. */
 .camctl-orient {
   flex: 0 0 auto;
   display: flex;
@@ -9167,85 +9171,6 @@ body.scene-playback-mode #first-run-launcher {
   align-items: center;
   gap: 1px;
   width: 100%;
-}
-
-.camctl-tape {
-  position: relative;
-  width: 100%;
-  height: 22px;
-  overflow: hidden;
-  /* Marks fade out at both ends instead of being cut off mid-glyph. */
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000000 18%, #000000 82%, transparent);
-  mask-image: linear-gradient(90deg, transparent, #000000 18%, #000000 82%, transparent);
-}
-
-/* Each mark spans the full tape width and is shifted by a percentage of
-   that width (see cameraControls.js), so the tape needs no pixel
-   measurement and survives the box being resized. */
-.camctl-tape-mark {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  color: var(--text-dim);
-  font: 600 8px/1 var(--font-mono);
-  letter-spacing: 0.06em;
-  pointer-events: none;
-}
-
-.camctl-tape-mark i {
-  width: 1px;
-  height: 5px;
-  background: currentcolor;
-}
-
-.camctl-tape-mark b {
-  font-weight: 600;
-}
-
-.camctl-tape-mark.is-cardinal {
-  color: var(--text-primary);
-}
-
-.camctl-tape-mark.is-cardinal i {
-  height: 8px;
-}
-
-.camctl-tape-mark[hidden] {
-  display: none;
-}
-
-/* Fixed index the tape runs under — the heading directly below it is what
-   sits at this mark. */
-.camctl-tape-index {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  width: 0;
-  height: 0;
-  border-left: 3px solid transparent;
-  border-right: 3px solid transparent;
-  border-top: 5px solid var(--accent);
-  transform: translateX(-50%);
-}
-
-/* The heading itself — magnetic where variation is known (°M), true
-   otherwise (°T). */
-.camctl-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 1px;
-  color: var(--accent);
-  font: 700 15px/1 var(--font-mono);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
-}
-
-.camctl-heading small {
-  font-size: 8px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
 }
 
 .camctl-orient-readout {
@@ -9289,29 +9214,35 @@ body.scene-playback-mode #first-run-launcher {
 }
 
 /* ── Simple two-button rows: orbit, yaw, pitch ───────────────────────── */
+/* Buttons doubled in size and the gaps between them tightened, per a
+ * direct user ask: this box is meant for touch-screen use (and is used
+ * rarely enough that a bigger on-screen footprint is a fair trade for
+ * easier hit targets) rather than precision mouse clicking. The box
+ * itself is left free to grow to fit — see cameraControls.js's
+ * DEFAULT_WIDTH/HEIGHT and MIN/MAX bounds. */
 .camctl-row {
   display: flex;
-  gap: 5px;
+  gap: 4px;
 }
 .camctl-row-btn {
-  width: 30px;
-  height: 26px;
-  font: 700 13px/1 var(--font-mono);
+  width: 60px;
+  height: 52px;
+  font: 700 18px/1 var(--font-mono);
 }
 
 /* ── Lateral (WASD) 4-way plus-shaped move pad ───────────────────────── */
 .camctl-dpad {
   display: grid;
-  grid-template-columns: 30px 30px 30px;
-  grid-template-rows: 26px 26px 26px;
+  grid-template-columns: 60px 60px 60px;
+  grid-template-rows: 52px 52px 52px;
   grid-template-areas:
     ".    up    ."
     "left .     right"
     ".    down  .";
-  gap: 4px;
+  gap: 3px;
 }
 .camctl-dpad-btn {
-  font: 700 13px/1 var(--font-mono);
+  font: 700 18px/1 var(--font-mono);
 }
 .camctl-dpad-up { grid-area: up; }
 .camctl-dpad-down { grid-area: down; }
@@ -9320,12 +9251,12 @@ body.scene-playback-mode #first-run-launcher {
 
 .camctl-aux {
   display: flex;
-  gap: 6px;
+  gap: 4px;
 }
 .camctl-aux-btn {
-  width: 30px;
-  height: 30px;
-  font: 700 15px/1 var(--font-mono);
+  width: 60px;
+  height: 60px;
+  font: 700 20px/1 var(--font-mono);
 }
 
 .camctl-legend {
@@ -9881,35 +9812,26 @@ body.scene-playback-mode #first-run-launcher {
 .gps-track-row__btn.is-active { color: var(--accent); border-color: var(--accent); }
 
 /* ── Movable HUD panels (src/panelDrag.js) ────────────────────────────────
- * pp-toggles / data-panel / cctv-panel / scene-panel can be dragged free of
- * their managed left-stack/right-rail flow by a grip planted in their
- * header. Undocking reparents the panel to <body>, which drops it out of
- * the stack-scoped rules that size its scroll container (e.g.
- * `#left-panel-stack > #data-panel:not(.collapsed) .data-panel-inner`) —
- * this block reproduces an equivalent bounded, scrollable box for the
- * floating state so a long list doesn't grow the panel off-screen.
+ * pp-toggles / data-panel / cctv-panel / scene-panel / global-context-panel
+ * can be dragged free of their managed left-stack/right-rail flow by
+ * grabbing anywhere on their header bar (buttons/inputs/selects/links
+ * inside the header keep their own click behaviour instead — see
+ * panelDrag.js's INTERACTIVE_SELECTOR). Undocking reparents the panel to
+ * <body>, which drops it out of the stack-scoped rules that size its
+ * scroll container (e.g. `#left-panel-stack > #data-panel:not(.collapsed)
+ * .data-panel-inner`) — this block reproduces an equivalent bounded,
+ * scrollable box for the floating state so a long list doesn't grow the
+ * panel off-screen.
  */
 
-.gev-panel-grip {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  margin-right: 2px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--text-dim);
-  font-size: 13px;
-  line-height: 1;
+.panel-header,
+.pp-header-row {
   cursor: grab;
-  border-radius: 5px;
-  transition: color var(--transition-fast), background var(--transition-fast);
 }
-.gev-panel-grip:hover { color: var(--accent); background: rgba(255, 255, 255, 0.06); }
-.gev-panel-grip:active { cursor: grabbing; }
+.panel-header.is-dragging,
+.pp-header-row.is-dragging {
+  cursor: grabbing;
+}
 
 .gev-panel-undocked {
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
@@ -10578,6 +10500,14 @@ body.scene-playback-mode #first-run-launcher {
 }
 .mapovl-btn:hover { color: var(--text-primary); border-color: var(--accent); }
 .mapovl-btn.is-active { color: var(--bg-dark); text-shadow: none; background: var(--accent); border-color: var(--accent); }
+.mapovl-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+  color: var(--text-secondary);
+  border-color: var(--glass-border);
+  background: rgba(0, 0, 0, 0.5);
+}
+.mapovl-btn:disabled:hover { color: var(--text-secondary); border-color: var(--glass-border); }
 .mapovl-copy-btn, .mapovl-reset-btn { width: 100%; }
 .mapovl-reset-btn { color: var(--text-primary); }
 .mapovl-reset-btn:hover { color: #ffffff; border-color: #ffffff; }
@@ -11487,14 +11417,101 @@ body.scene-playback-mode #first-run-launcher {
   fill: var(--text-primary);
 }
 
-/* The box's only text: variation, on the panel's own glass, no plate of
-   its own behind it. */
+/* The box's only prose text: variation, on the panel's own glass, no plate
+   of its own behind it. */
 .compassbox-readout {
   flex: 0 0 auto;
   font: 600 10px/1 var(--font-mono);
   letter-spacing: 0.06em;
   color: var(--text-secondary);
   opacity: 0.8;
+}
+
+/* Bearing tape — moved here from the Controls box (formerly Camera): a flat
+ * compass tape whose cardinal marks slide under a fixed center index as the
+ * camera turns, with the magnetic heading underneath. Same mechanics as the
+ * ring above (driven off the live camera heading every postRender frame),
+ * just a second, numeric read of the same value. */
+.compassbox-orient {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  width: 100%;
+}
+
+.compassbox-tape {
+  position: relative;
+  width: 100%;
+  height: 22px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000000 18%, #000000 82%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000000 18%, #000000 82%, transparent);
+}
+
+.compassbox-tape-mark {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-dim);
+  font: 600 8px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+
+.compassbox-tape-mark i {
+  width: 1px;
+  height: 5px;
+  background: currentcolor;
+}
+
+.compassbox-tape-mark b {
+  font-weight: 600;
+}
+
+.compassbox-tape-mark.is-cardinal {
+  color: var(--text-primary);
+}
+
+.compassbox-tape-mark.is-cardinal i {
+  height: 8px;
+}
+
+.compassbox-tape-mark[hidden] {
+  display: none;
+}
+
+.compassbox-tape-index {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 5px solid var(--accent);
+  transform: translateX(-50%);
+}
+
+/* The heading itself — magnetic where variation is known (°M), true
+   otherwise (°T). */
+.compassbox-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  color: var(--accent);
+  font: 700 15px/1 var(--font-mono);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+}
+
+.compassbox-heading small {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
 .compassbox-resize-handle {

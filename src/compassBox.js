@@ -1,33 +1,57 @@
 import * as Cesium from 'cesium';
 import { buildMiniBox } from './miniBox.js';
 import { getMagneticDeclination } from './data/magneticDeclination.js';
+import { compassTapeMarks } from './cameraMath.js';
+import { magneticHeadingDegrees } from './magneticVariation.js';
 
 /**
  * @file Standalone "Compass" mini control box: a live true-north reference
  * ring plus a magnetic-north needle offset by the local magnetic
  * declination (variation) at wherever the camera currently is — see
  * `data/magneticDeclination.js` (a pure-JS World Magnetic Model
- * evaluation). Independent of `cameraControls.js`'s own orientation
- * compass, which shows where the CAMERA is looking; this one is a
- * navigation instrument showing how a magnetic compass held at the
- * current location would disagree with true north, updating as the view
- * moves around the globe.
+ * evaluation) — and, underneath the ring, the numeric bearing tape (moved
+ * here from the Controls box, formerly Camera, per a direct user ask: all
+ * heading/orientation info lives in one box now instead of being split
+ * across two). The ring shows where the CAMERA is looking as a
+ * true-north-referenced needle; the tape underneath shows the same
+ * heading as a scrolling numeric readout, magnetic where local variation
+ * is known (°M), true otherwise (°T) — same pairing `cameraControls.js`
+ * used to draw on its own.
  *
  * The ring/ticks/true-north needle counter-rotate against the camera's
  * current heading (`_applyHeadingRotation`, run every rendered frame —
- * same `scene.postRender` pattern as `cameraControls.js`'s own needle,
- * so it tracks smoothly while dragging to rotate the view rather than
- * lagging behind) so "N" always points to the actual screen-space
- * direction of true north. Earlier versions drew the ring hard-fixed
- * pointing straight up regardless of camera heading, which only looked
- * correct when the camera happened to be facing due north — any other
- * heading made the compass visibly disagree with real north.
+ * same `scene.postRender` pattern `cameraControls.js`'s own tape used) so
+ * "N" always points to the actual screen-space direction of true north.
+ * Earlier versions drew the ring hard-fixed pointing straight up
+ * regardless of camera heading, which only looked correct when the
+ * camera happened to be facing due north — any other heading made the
+ * compass visibly disagree with real north. The tape is driven by the
+ * same per-frame heading value, converted to magnetic using whatever
+ * declination `_recompute`'s debounced World Magnetic Model sample last
+ * found (see that method) — no separate lookup of its own.
  *
  * Same movable/resizable/persisted-position/collapsible/hideable box
  * mechanics as the app's other mini-boxes, built on `miniBox.js`.
  *
  * @module compassBox
  */
+
+/** Degrees of compass tape visible either side of the center index — same span `cameraControls.js`'s tape used. */
+const TAPE_HALF_SPAN_DEG = 60;
+/** Spacing between compass tape marks, in degrees. */
+const TAPE_STEP_DEG = 15;
+
+/** Radians → unsigned compass degrees in [0, 360). */
+function toCompassDeg(rad) {
+  let deg = Cesium.Math.toDegrees(rad) % 360;
+  if (deg < 0) deg += 360;
+  return deg;
+}
+
+/** Compass degrees → a zero-padded three-digit label, `360` folded to `000`. */
+function fmtCompassDeg(deg) {
+  return (Math.round(deg) % 360).toString().padStart(3, '0');
+}
 
 /** Recompute declination this long after the camera stops moving, not on every frame — matches `data/mapOverlays.js`'s RECOMPUTE_DEBOUNCE_MS pattern; declination changes smoothly over hundreds of km, so per-frame precision buys nothing. */
 const RECOMPUTE_DEBOUNCE_MS = 400;
@@ -58,6 +82,7 @@ export class CompassBox {
     // recompute — otherwise the magnetic needle would sit at the wrong
     // angle for up to 400ms after every rotation.
     this._lastDeclinationDeg = 0;
+    this._lastDeclinationSampleOk = false;
     this._onCameraMoveEnd = () => this._scheduleRecompute();
     this._onPostRender = () => this._applyHeadingRotation();
     this._build();
@@ -72,13 +97,15 @@ export class CompassBox {
       idPrefix: 'compassbox',
       storagePrefix: 'godsEyeView.compassBox.',
       title: 'COMPASS',
-      ariaLabel: 'Compass: true north reference and local magnetic variation',
+      ariaLabel: 'Compass: true north reference, local magnetic variation, and bearing tape',
+      // Grown from 190×220 to make room for the bearing tape/heading
+      // readout moved in from the Controls box (formerly Camera).
       defaultWidth: 190,
-      defaultHeight: 220,
-      minWidth: 130,
+      defaultHeight: 272,
+      minWidth: 150,
       maxWidth: 360,
-      minHeight: 150,
-      maxHeight: 460,
+      minHeight: 200,
+      maxHeight: 500,
       anchor: { left: '292px', top: '894px' },
     });
     this._box = box;
@@ -175,6 +202,43 @@ export class CompassBox {
     const outVariation = el('div', 'compassbox-readout');
     body.appendChild(outVariation);
     this._outVariation = outVariation;
+
+    // Bearing tape: a flat compass tape whose cardinal marks slide under a
+    // fixed center index as the camera turns, with the numeric heading
+    // underneath — moved here from the Controls box (formerly Camera).
+    const orient = el('div', 'compassbox-orient');
+    orient.setAttribute('aria-hidden', 'true');
+
+    const tape = el('div', 'compassbox-tape');
+    tape.title = 'Bearing tape — cardinal marks slide under the center index as the camera turns';
+
+    const tapeMarks = [];
+    const markCount = Math.ceil((2 * TAPE_HALF_SPAN_DEG) / TAPE_STEP_DEG) + 1;
+    for (let i = 0; i < markCount; i += 1) {
+      const mark = document.createElement('span');
+      mark.className = 'compassbox-tape-mark';
+      const tick = document.createElement('i');
+      const label = document.createElement('b');
+      mark.append(tick, label);
+      tape.appendChild(mark);
+      tapeMarks.push({ el: mark, labelEl: label });
+    }
+    this._tapeMarks = tapeMarks;
+
+    const tapeIndex = el('span', 'compassbox-tape-index');
+    tape.appendChild(tapeIndex);
+    orient.appendChild(tape);
+
+    const heading = el('div', 'compassbox-heading');
+    const headingValue = el('b', null, '000');
+    const headingRef = el('small', null, '°M');
+    heading.append(headingValue, headingRef);
+    orient.appendChild(heading);
+    this._headingEl = heading;
+    this._headingValue = headingValue;
+    this._headingRef = headingRef;
+
+    body.appendChild(orient);
   }
 
   _scheduleRecompute() {
@@ -191,6 +255,7 @@ export class CompassBox {
 
     if (!result) {
       this._lastDeclinationDeg = 0;
+      this._lastDeclinationSampleOk = false;
       this._applyHeadingRotation();
       this._outVariation.textContent = 'Variation —';
       return;
@@ -203,6 +268,7 @@ export class CompassBox {
     // by that many degrees, on top of whatever the current heading
     // needs — see _applyHeadingRotation for the combined angle.
     this._lastDeclinationDeg = declinationDeg;
+    this._lastDeclinationSampleOk = true;
     this._applyHeadingRotation();
     this._outVariation.textContent = `Variation ${fmtDeclination(declinationDeg)}`;
   }
@@ -223,6 +289,49 @@ export class CompassBox {
     // of true north, whatever way the view is currently facing.
     this._ringGroup.setAttribute('transform', `rotate(${-headingDeg} 20 20)`);
     this._magNeedle.setAttribute('transform', `rotate(${this._lastDeclinationDeg - headingDeg} 20 20)`);
+    this._updateBearingTape(headingDeg);
+  }
+
+  /**
+   * Bearing tape + numeric heading readout — same per-frame cadence as the
+   * ring above, so both stay in lockstep. Magnetic where a declination
+   * sample is available (this box's own debounced `_recompute`, not a
+   * fresh lookup here), true otherwise — mirrors what `cameraControls.js`'s
+   * tape used to do before it moved here.
+   */
+  _updateBearingTape(trueHeadingDeg) {
+    const hasDeclination = this._lastDeclinationSampleOk;
+    const magneticDeg = hasDeclination
+      ? magneticHeadingDegrees(trueHeadingDeg, this._lastDeclinationDeg)
+      : null;
+    const displayHeadingDeg = magneticDeg ?? trueHeadingDeg;
+
+    const marks = compassTapeMarks(displayHeadingDeg, {
+      halfSpanDeg: TAPE_HALF_SPAN_DEG,
+      stepDeg: TAPE_STEP_DEG,
+    });
+    this._tapeMarks.forEach((slot, index) => {
+      const mark = marks[index];
+      if (!mark) {
+        slot.el.hidden = true;
+        return;
+      }
+      slot.el.hidden = false;
+      slot.el.style.transform = `translateX(${(mark.offsetRatio * 50).toFixed(3)}%)`;
+      slot.el.style.opacity = (1 - (Math.abs(mark.offsetRatio) ** 2) * 0.8).toFixed(3);
+      slot.el.classList.toggle('is-cardinal', mark.cardinal);
+      if (slot.labelEl.textContent !== mark.label) slot.labelEl.textContent = mark.label;
+    });
+
+    const headingText = fmtCompassDeg(displayHeadingDeg);
+    const refText = magneticDeg === null ? '°T' : '°M';
+    if (this._headingValue.textContent !== headingText) {
+      this._headingValue.textContent = headingText;
+      this._headingEl.title = magneticDeg === null
+        ? 'Heading relative to true north — local magnetic variation is unavailable here'
+        : `Magnetic heading — ${fmtCompassDeg(trueHeadingDeg)}° true, variation ${this._outVariation.textContent}`;
+    }
+    if (this._headingRef.textContent !== refText) this._headingRef.textContent = refText;
   }
 
   destroy() {

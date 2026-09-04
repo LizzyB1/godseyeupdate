@@ -1,11 +1,6 @@
 import * as Cesium from 'cesium';
 import { buildMiniBox } from './miniBox.js';
-import { compassTapeMarks, computeHorizontalForward, signedRollFromLevel } from './cameraMath.js';
-import {
-  declinationDegrees,
-  formatVariation,
-  magneticHeadingDegrees,
-} from './magneticVariation.js';
+import { computeHorizontalForward, signedRollFromLevel } from './cameraMath.js';
 
 /**
  * Keyboard + mouse + on-screen camera controls, housed in one movable,
@@ -136,12 +131,17 @@ const LEVEL_SNAP_EPSILON_RAD = Cesium.Math.toRadians(0.05);
 
 /** Box drag/resize/collapse persistence + bounds — passed straight to `buildMiniBox`. */
 const STORAGE_PREFIX = 'godsEyeView.camCtlBox.';
-const DEFAULT_WIDTH = 176;
-const DEFAULT_HEIGHT = 360;
-const MIN_WIDTH = 150;
-const MAX_WIDTH = 360;
-const MIN_HEIGHT = 260;
-const MAX_HEIGHT = 560;
+// Grown to fit the doubled-size touch buttons below (per a direct user
+// ask — this box is for touch-screen use and is used rarely enough that a
+// bigger footprint is worth the easier hit targets). The 3-wide D-pad
+// alone now needs ~190px of button width before padding, so MIN_WIDTH in
+// particular moves up with it.
+const DEFAULT_WIDTH = 220;
+const DEFAULT_HEIGHT = 480;
+const MIN_WIDTH = 210;
+const MAX_WIDTH = 420;
+const MIN_HEIGHT = 340;
+const MAX_HEIGHT = 680;
 
 /** Keys mapped to a held "direction"/"action" name. Arrow keys carry over
  * the subset of the scheme they've always aliased (forward/back, orbit);
@@ -213,29 +213,12 @@ function isEditableTarget(el) {
  */
 const LEGACY_SHORTCUT_CODES = new Set(['KeyF', 'KeyD', 'Digit1', 'Digit3']);
 
-/** Degrees of compass tape visible either side of the center index. */
-const TAPE_HALF_SPAN_DEG = 60;
-/** Spacing between compass tape marks, in degrees. */
-const TAPE_STEP_DEG = 15;
-
-/** Radians → unsigned compass degrees in [0, 360). */
-function toCompassDeg(rad) {
-  let deg = Cesium.Math.toDegrees(rad) % 360;
-  if (deg < 0) deg += 360;
-  return deg;
-}
-
 /** Radians → signed degrees in (-180, 180]. */
 function toSignedDeg(rad) {
   let deg = Cesium.Math.toDegrees(rad) % 360;
   if (deg > 180) deg -= 360;
   if (deg < -180) deg += 360;
   return deg;
-}
-
-/** Compass degrees → a zero-padded three-digit label, `360` folded to `000`. */
-function fmtCompassDeg(deg) {
-  return (Math.round(deg) % 360).toString().padStart(3, '0');
 }
 
 function fmtSignedDeg(deg) {
@@ -252,10 +235,15 @@ function fmtSignedDeg(deg) {
  */
 function buildControlBox({ onPress, onRelease }) {
   const miniBox = buildMiniBox({
+    // idPrefix/storagePrefix are unchanged (still "camctl"/the old camera
+    // storage key) so everyone's saved position/size survives the rename —
+    // only the visible title changed, from "CAMERA" to "CONTROLS", per a
+    // direct user ask once the bearing tape moved out to the Compass box:
+    // what's left is movement/orbit/pitch/zoom buttons, not orientation.
     idPrefix: 'camctl',
     storagePrefix: STORAGE_PREFIX,
-    title: 'CAMERA',
-    ariaLabel: 'Camera ground-move, orbit, pitch, zoom, and orientation controls',
+    title: 'CONTROLS',
+    ariaLabel: 'Camera movement controls: ground-move, orbit, pitch, and zoom',
     defaultWidth: DEFAULT_WIDTH,
     defaultHeight: DEFAULT_HEIGHT,
     minWidth: MIN_WIDTH,
@@ -270,57 +258,20 @@ function buildControlBox({ onPress, onRelease }) {
   });
   const body = miniBox.body;
 
-  // Orientation: a flat compass tape whose cardinal marks slide under a
-  // fixed center index as the camera turns, with the magnetic heading and
-  // one dim variation/pitch line underneath it. Everything reads straight
-  // over the map — no filled chips — so the block adds no opaque surface of
-  // its own.
+  // Orientation: just the pitch readout now — the bearing tape and
+  // magnetic-heading number that used to live here moved to the Compass
+  // box (compassBox.js) per a direct user ask, so all heading/orientation
+  // info lives in one place instead of being split across two boxes. Roll
+  // is omitted — the horizon is locked level, so it only ever read ±0°.
   const orient = document.createElement('div');
   orient.className = 'camctl-orient';
   orient.setAttribute('aria-hidden', 'true');
 
-  const tape = document.createElement('div');
-  tape.className = 'camctl-tape';
-  tape.title = 'Magnetic compass tape — cardinal marks slide under the center index as the camera turns';
-
-  // One pooled element per mark slot. The tape spans a fixed number of
-  // degrees at a fixed interval, so the slot count never changes and each
-  // frame only rewrites transforms and labels.
-  const tapeMarks = [];
-  const markCount = Math.ceil((2 * TAPE_HALF_SPAN_DEG) / TAPE_STEP_DEG) + 1;
-  for (let i = 0; i < markCount; i += 1) {
-    const mark = document.createElement('span');
-    mark.className = 'camctl-tape-mark';
-    const tick = document.createElement('i');
-    const label = document.createElement('b');
-    mark.append(tick, label);
-    tape.appendChild(mark);
-    tapeMarks.push({ el: mark, labelEl: label });
-  }
-
-  const tapeIndex = document.createElement('span');
-  tapeIndex.className = 'camctl-tape-index';
-  tape.appendChild(tapeIndex);
-  orient.appendChild(tape);
-
-  const heading = document.createElement('div');
-  heading.className = 'camctl-heading';
-  const headingValue = document.createElement('b');
-  headingValue.textContent = '000';
-  const headingRef = document.createElement('small');
-  headingRef.textContent = '°M';
-  heading.append(headingValue, headingRef);
-  orient.appendChild(heading);
-
-  // One dim line: local magnetic variation (east positive) and pitch. Roll
-  // is omitted — the horizon is locked level, so it only ever read ±0°.
   const readout = document.createElement('div');
   readout.className = 'camctl-orient-readout';
-  const variationField = document.createElement('span');
-  variationField.textContent = 'VAR ---';
   const pitchField = document.createElement('span');
   pitchField.textContent = 'PIT ±0°';
-  readout.append(variationField, pitchField);
+  readout.append(pitchField);
   orient.appendChild(readout);
 
   body.appendChild(orient);
@@ -420,12 +371,7 @@ function buildControlBox({ onPress, onRelease }) {
   body.appendChild(legend);
 
   return {
-    headingValue,
-    headingRef,
-    variationField,
     pitchField,
-    headingEl: heading,
-    tapeMarks,
     destroy() {
       miniBox.destroy();
     },
@@ -755,60 +701,11 @@ export class CameraControls {
     const box = this._box;
     if (!box) return;
 
-    const trueHeadingDeg = toCompassDeg(camera.heading);
+    // Heading/bearing/variation now live entirely in the Compass box
+    // (compassBox.js) — this box only still tracks its own pitch, which
+    // is specific to how the camera is looking, not a compass reading.
     const pitchDeg = toSignedDeg(camera.pitch);
-
-    // Where a ground compass under the camera would point: Cesium reports
-    // heading against true north, so the local variation has to come off it
-    // before the number means anything to a compass in hand.
-    const carto = camera.positionCartographic;
-    const variationDeg = carto
-      ? declinationDegrees(
-        Cesium.Math.toDegrees(carto.latitude),
-        Cesium.Math.toDegrees(carto.longitude),
-      )
-      : null;
-    const magneticDeg = magneticHeadingDegrees(trueHeadingDeg, variationDeg);
-    const displayHeadingDeg = magneticDeg ?? trueHeadingDeg;
-
-    const marks = compassTapeMarks(displayHeadingDeg, {
-      halfSpanDeg: TAPE_HALF_SPAN_DEG,
-      stepDeg: TAPE_STEP_DEG,
-    });
-    box.tapeMarks.forEach((slot, index) => {
-      const mark = marks[index];
-      if (!mark) {
-        slot.el.hidden = true;
-        return;
-      }
-      slot.el.hidden = false;
-      // The mark spans the tape's full width, so a percentage translate
-      // resolves against the tape rather than the mark's own text — the
-      // layout therefore needs no pixel measurement of the box, which the
-      // user is free to resize.
-      slot.el.style.transform = `translateX(${(mark.offsetRatio * 50).toFixed(3)}%)`;
-      // Fade toward the ends instead of clipping marks off mid-glyph.
-      slot.el.style.opacity = (1 - (Math.abs(mark.offsetRatio) ** 2) * 0.8).toFixed(3);
-      slot.el.classList.toggle('is-cardinal', mark.cardinal);
-      if (slot.labelEl.textContent !== mark.label) slot.labelEl.textContent = mark.label;
-    });
-
-    const headingText = fmtCompassDeg(displayHeadingDeg);
-    const refText = magneticDeg === null ? '°T' : '°M';
-    const variationText = `VAR ${formatVariation(variationDeg)}`;
     const pitchText = `PIT ${fmtSignedDeg(pitchDeg)}`;
-    if (box.headingValue.textContent !== headingText) {
-      box.headingValue.textContent = headingText;
-      // True heading is the tooltip rather than a fourth readout — the
-      // magnetic number is the one being asked for at a glance.
-      box.headingEl.title = magneticDeg === null
-        ? 'Heading relative to true north — local magnetic variation is unavailable here'
-        : `Magnetic heading — ${fmtCompassDeg(trueHeadingDeg)}° true, variation ${formatVariation(variationDeg)}`;
-    }
-    if (box.headingRef.textContent !== refText) box.headingRef.textContent = refText;
-    if (box.variationField.textContent !== variationText) {
-      box.variationField.textContent = variationText;
-    }
     if (box.pitchField.textContent !== pitchText) box.pitchField.textContent = pitchText;
   }
 

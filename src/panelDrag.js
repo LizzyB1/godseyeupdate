@@ -43,8 +43,21 @@
  * choreography — full drag would fight that interaction model). Both still
  * get full-hide (panelVisibility.js) and their existing collapse-to-strip.
  *
+ * The whole header row is the drag handle (pointerdown anywhere on it that
+ * isn't a button/input/select/link starts the drag) — the same
+ * grab-anywhere-on-the-bar behaviour `miniBox.js`'s boxes (Camera, Compass,
+ * Map Overlays, ...) already had. This module used to only start a drag
+ * from a small `⠿` grip glyph planted at the header's left edge, which
+ * meant grabbing the rest of the bar did nothing — the grip is gone now
+ * that the header itself owns pointerdown.
+ *
  * @module panelDrag
  */
+
+/** Buttons, form controls and links inside a header must keep their own
+ * click behaviour — a pointerdown on one of these must not also start a
+ * panel drag. */
+const INTERACTIVE_SELECTOR = 'button, input, select, textarea, a';
 
 import { attachResizeHandles } from './panelResize.js';
 
@@ -78,7 +91,7 @@ class DraggablePanel {
   /**
    * @param {string} id
    * @param {HTMLElement} panelEl
-   * @param {HTMLElement} gripEl
+   * @param {HTMLElement} headerEl
    * @param {PanelDragManager} manager
    * @param {{varName:string,min:number,max:number}|null} resize - Width-resize config: the
    *   panel's own CSS custom property that controls its expanded width (e.g.
@@ -88,10 +101,10 @@ class DraggablePanel {
    *   (`--left-panel-allocated-height`), which would silently overwrite a
    *   manual height a frame later.
    */
-  constructor(id, panelEl, gripEl, manager, resize = null) {
+  constructor(id, panelEl, headerEl, manager, resize = null) {
     this.id = id;
     this.el = panelEl;
-    this.grip = gripEl;
+    this.header = headerEl;
     this.manager = manager;
     this.resize = resize;
     this.undocked = false;
@@ -102,8 +115,13 @@ class DraggablePanel {
     this._onMove = this._onMove.bind(this);
     this._onUp = this._onUp.bind(this);
 
-    this.grip.addEventListener('pointerdown', this._onPointerDown);
-    this.grip.addEventListener('dblclick', (event) => {
+    // The whole header is the drag handle now — a pointerdown on any of its
+    // own buttons/inputs/selects/links (collapse, close, and whatever else
+    // a given header carries, e.g. global-context-panel's radio toggle)
+    // must keep doing its own thing instead of starting a drag.
+    this.header.addEventListener('pointerdown', this._onPointerDown);
+    this.header.addEventListener('dblclick', (event) => {
+      if (event.target.closest(INTERACTIVE_SELECTOR)) return;
       event.preventDefault();
       this.dock();
     });
@@ -206,6 +224,10 @@ class DraggablePanel {
 
   _onPointerDown(event) {
     if (event.button !== 0) return;
+    // Let the header's own controls (collapse, close, the Context panel's
+    // radio toggle, ...) handle their own click — only the bare bar starts
+    // a drag.
+    if (event.target.closest(INTERACTIVE_SELECTOR)) return;
     event.preventDefault();
     const rect = this.el.getBoundingClientRect();
     this._offsetX = event.clientX - rect.left;
@@ -218,6 +240,7 @@ class DraggablePanel {
     this.el.style.right = 'auto';
     this.el.style.bottom = 'auto';
     this.el.classList.add('gev-panel-dragging');
+    this.header.classList.add('is-dragging');
     this.manager._bringToFront(this);
 
     window.addEventListener('pointermove', this._onMove);
@@ -241,6 +264,7 @@ class DraggablePanel {
     window.removeEventListener('pointerup', this._onUp);
     window.removeEventListener('pointercancel', this._onUp);
     this.el.classList.remove('gev-panel-dragging');
+    this.header.classList.remove('is-dragging');
     this._save();
   }
 
@@ -283,7 +307,7 @@ class PanelDragManager {
   /**
    * @param {string} id - Stable id (used as the localStorage key and DOM lookup fallback).
    * @param {string} panelSelector - CSS selector for the panel element.
-   * @param {string} headerSelector - CSS selector (relative to document) for the header to plant the grip in.
+   * @param {string} headerSelector - CSS selector (relative to document) for the header that acts as the drag handle.
    * @param {{varName:string,min:number,max:number}|null} [resize] - Optional width-resize config (see DraggablePanel).
    */
   register(id, panelSelector, headerSelector, resize = null) {
@@ -291,18 +315,10 @@ class PanelDragManager {
     const headerEl = document.querySelector(headerSelector);
     if (!panelEl || !headerEl) return null;
 
-    let grip = headerEl.querySelector(':scope > .gev-panel-grip');
-    if (!grip) {
-      grip = document.createElement('button');
-      grip.type = 'button';
-      grip.className = 'gev-panel-grip';
-      grip.title = 'Drag to move · double-click to reset position';
-      grip.setAttribute('aria-label', `Drag to move panel (double-click to reset)`);
-      grip.textContent = '⠿';
-      headerEl.insertBefore(grip, headerEl.firstChild);
-    }
+    headerEl.title = 'Drag to move · double-click to reset position';
+    headerEl.setAttribute('aria-label', `${headerEl.getAttribute('aria-label') || ''} — drag to move, double-click to reset position`.trim());
 
-    const panel = new DraggablePanel(id, panelEl, grip, this, resize);
+    const panel = new DraggablePanel(id, panelEl, headerEl, this, resize);
     this._panels.push(panel);
     return panel;
   }

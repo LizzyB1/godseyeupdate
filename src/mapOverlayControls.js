@@ -255,20 +255,40 @@ export class MapOverlayControls {
     // path (data/mapOverlays.js's `refreshContours`), for whenever a
     // repaint from cache or the last live sample doesn't look right and a
     // recompute from scratch is wanted right now, not on the next pan.
+    //
+    // `refreshContours()` is a no-op while contours are switched off (see
+    // its doc comment), so the button is kept disabled — greyed out, not
+    // clickable — for that whole time rather than silently doing nothing
+    // when pressed. `_syncRefreshBtnState()` below is the single source of
+    // truth for that disabled state and is re-run everywhere
+    // `contourEnable`'s checked state changes, including the programmatic
+    // uncheck in the "Reset all overlay controls" handler further down.
     const refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
     refreshBtn.className = 'mapovl-btn mapovl-refresh-contours-btn';
     refreshBtn.textContent = '⟳ Refresh contours';
-    refreshBtn.title = 'Recompute contours for the current view right now, ignoring any cached result';
     refreshBtn.addEventListener('click', () => this.engine.refreshContours());
     contourSection.appendChild(refreshBtn);
+    this._refreshBtn = refreshBtn;
+    const syncRefreshBtnState = () => {
+      const enabled = contourEnable.checked;
+      refreshBtn.disabled = !enabled;
+      refreshBtn.title = enabled
+        ? 'Recompute contours for the current view right now, ignoring any cached result'
+        : 'Turn on "Show contour lines" first — there are no contours to refresh yet';
+    };
+    this._syncRefreshBtnState = syncRefreshBtnState;
+    syncRefreshBtnState();
 
     const contourStatus = el('div', 'mapovl-status', '');
     contourSection.appendChild(contourStatus);
     this._contourStatus = contourStatus;
     body.appendChild(contourSection);
 
-    contourEnable.addEventListener('change', () => this.engine.setContoursEnabled(contourEnable.checked));
+    contourEnable.addEventListener('change', () => {
+      this.engine.setContoursEnabled(contourEnable.checked);
+      this._syncRefreshBtnState();
+    });
     intervalSelect.addEventListener('change', () => this.engine.setContourMajorSpacing(Number(intervalSelect.value)));
     minorEnable.addEventListener('change', () => this.engine.setContourMinorEnabled(minorEnable.checked));
 
@@ -453,6 +473,7 @@ export class MapOverlayControls {
     resetBtn.addEventListener('click', () => {
       this.engine.reset();
       contourEnable.checked = false;
+      this._syncRefreshBtnState();
       intervalSelect.value = String(this.engine.state.contourMajorSpacing);
       minorEnable.checked = false;
       precisionInput.value = String(this.engine.state.contourSmoothing);
