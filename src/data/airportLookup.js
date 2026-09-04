@@ -51,11 +51,31 @@ export function lookupAirportIn(directory, code) {
   };
 }
 
-/** Compact route-endpoint tag for labels: code plus ISO country, "AUS (US)". */
+/** Trailing words that say "this is an airport" and nothing else. Military
+ *  bases keep their suffix — "Kadena" alone loses what the place is. */
+const GENERIC_AIRPORT_SUFFIX = /\s+(?:International|Regional|Municipal|Domestic|National)?\s*(?:Airport|Aerodrome|Airfield|Airstrip|Airpark|Heliport)$/i;
+
+/**
+ * The airport's basic name — what a person calls it, without the
+ * "International Airport" tail: "Austin Bergstrom International Airport"
+ * → "Austin Bergstrom". Names that are nothing but the suffix are kept whole.
+ * @param {string} name Full directory name.
+ * @returns {string} Short name.
+ */
+export function shortAirportName(name) {
+  const full = String(name || '').trim();
+  const short = full.replace(GENERIC_AIRPORT_SUFFIX, '').trim();
+  return short || full;
+}
+
+/** Compact route-endpoint tag for labels: code, basic airport name and ISO
+ *  country as each resolves, e.g. "AUS · Austin Bergstrom (US)". */
 export function routeEndpointTag(airport) {
   const code = String(airport?.code || '').trim();
+  const name = shortAirportName(airport?.name);
   const country = String(airport?.countryCode || '').trim();
-  return country ? `${code} (${country})` : code;
+  const named = [code, name].filter(Boolean).join(' · ');
+  return country ? `${named} (${country})` : named;
 }
 
 /** Spelled-out endpoint, e.g. "AUS · Austin-Bergstrom International Airport, United States". */
