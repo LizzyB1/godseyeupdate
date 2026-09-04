@@ -97,8 +97,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function readLayerControl(page, layerId, expectedLabel) {
   await page.waitForFunction(
     (id, label) => {
-      const button = document.querySelector(`[data-layer-id="${id}"] .data-toggle-btn`);
-      return button?.textContent?.trim() === label;
+      const state = document.querySelector(`[data-layer-id="${id}"] .data-toggle-state`);
+      return state?.textContent?.trim() === label;
     },
     { timeout: 5000 },
     layerId,
@@ -109,7 +109,7 @@ async function readLayerControl(page, layerId, expectedLabel) {
     const button = row?.querySelector('.data-toggle-btn');
     const meta = row?.querySelector('.data-toggle-meta');
     return {
-      label: button?.textContent?.trim() || '',
+      label: row?.querySelector('.data-toggle-state')?.textContent?.trim() || '',
       feedState: button?.dataset?.feedState || '',
       ariaLabel: button?.getAttribute('aria-label') || '',
       meta: meta?.textContent?.trim() || '',

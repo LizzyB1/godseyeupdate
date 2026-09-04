@@ -45,9 +45,8 @@ function svgEl(tag) {
 
 function fmtDeclination(deg) {
   if (!Number.isFinite(deg)) return '—';
-  const rounded = Math.abs(deg).toFixed(1);
-  if (Math.abs(deg) < 0.05) return '0.0° (true ≈ magnetic)';
-  return `${rounded}° ${deg > 0 ? 'E' : 'W'}`;
+  if (Math.abs(deg) < 0.05) return '0.0°';
+  return `${Math.abs(deg).toFixed(1)}° ${deg > 0 ? 'E' : 'W'}`;
 }
 
 export class CompassBox {
@@ -74,11 +73,11 @@ export class CompassBox {
       storagePrefix: 'godsEyeView.compassBox.',
       title: 'COMPASS',
       ariaLabel: 'Compass: true north reference and local magnetic variation',
-      defaultWidth: 220,
-      defaultHeight: 300,
-      minWidth: 190,
+      defaultWidth: 190,
+      defaultHeight: 220,
+      minWidth: 130,
       maxWidth: 360,
-      minHeight: 240,
+      minHeight: 150,
       maxHeight: 460,
       anchor: { left: '292px', top: '894px' },
     });
@@ -153,35 +152,29 @@ export class CompassBox {
     magNeedle.appendChild(magNeedlePath);
     svg.appendChild(magNeedle);
 
+    // Heading pointer: the direction the camera itself is facing, read the
+    // same way as the two north needles — an arrow from the hub — rather
+    // than as a number somewhere else on screen. It is deliberately OUTSIDE
+    // the rotating ring group: the ring counter-rotates by the camera
+    // heading so N tracks true north, which leaves screen-up meaning
+    // "where the camera is pointing", so this arrow is fixed there and the
+    // ring turns underneath it.
+    const headingNeedle = svgEl('path');
+    headingNeedle.setAttribute('class', 'compassbox-heading-needle');
+    headingNeedle.setAttribute('d', 'M20 20 L18.8 5.2 L20 2.6 L21.2 5.2 Z');
+    svg.appendChild(headingNeedle);
+
     ringWrap.appendChild(svg);
     body.appendChild(ringWrap);
     this._magNeedle = magNeedle;
 
-    const legend = el('div', 'compassbox-legend');
-    const trueRow = el('div', 'compassbox-legend-row');
-    trueRow.appendChild(el('span', 'compassbox-swatch compassbox-swatch-true'));
-    trueRow.appendChild(el('span', null, 'True north'));
-    const magRow = el('div', 'compassbox-legend-row');
-    magRow.appendChild(el('span', 'compassbox-swatch compassbox-swatch-mag'));
-    magRow.appendChild(el('span', null, 'Magnetic north'));
-    legend.appendChild(trueRow);
-    legend.appendChild(magRow);
-    body.appendChild(legend);
-
-    const output = el('div', 'mapovl-output');
-    const outDecl = el('div', 'mapovl-output-row');
-    const outAdvice = el('div', 'mapovl-output-row');
-    const outLoc = el('div', 'mapovl-output-row');
-    const outModel = el('div', 'mapovl-hint');
-    output.appendChild(outDecl);
-    output.appendChild(outAdvice);
-    output.appendChild(outLoc);
-    output.appendChild(outModel);
-    body.appendChild(output);
-    this._outDecl = outDecl;
-    this._outAdvice = outAdvice;
-    this._outLoc = outLoc;
-    this._outModel = outModel;
+    // One line, under the compass, on the box's own transparency — the
+    // variation and nothing else. The needles say which north is which;
+    // the earlier legend, bearing-correction sentence, camera lat/lon and
+    // model name said it again in prose.
+    const outVariation = el('div', 'compassbox-readout');
+    body.appendChild(outVariation);
+    this._outVariation = outVariation;
   }
 
   _scheduleRecompute() {
@@ -199,14 +192,11 @@ export class CompassBox {
     if (!result) {
       this._lastDeclinationDeg = 0;
       this._applyHeadingRotation();
-      this._outDecl.textContent = 'Magnetic variation: unavailable here.';
-      this._outAdvice.textContent = '';
-      this._outLoc.textContent = '';
-      this._outModel.textContent = '';
+      this._outVariation.textContent = 'Variation —';
       return;
     }
 
-    const { declinationDeg, modelName } = result;
+    const { declinationDeg } = result;
     // WMM convention: positive declination = magnetic north lies EAST of
     // true north, which on this ring (clockwise = east, once oriented to
     // true north by _applyHeadingRotation) is a clockwise SVG rotation
@@ -214,16 +204,7 @@ export class CompassBox {
     // needs — see _applyHeadingRotation for the combined angle.
     this._lastDeclinationDeg = declinationDeg;
     this._applyHeadingRotation();
-
-    this._outDecl.textContent = `Magnetic variation: ${fmtDeclination(declinationDeg)}`;
-    if (Math.abs(declinationDeg) >= 0.05) {
-      const towardTrue = declinationDeg > 0 ? 'subtract' : 'add';
-      this._outAdvice.textContent = `${towardTrue} ${Math.abs(declinationDeg).toFixed(1)}° from a magnetic bearing to get true.`;
-    } else {
-      this._outAdvice.textContent = '';
-    }
-    this._outLoc.textContent = `At ${lat.toFixed(2)}°, ${lon.toFixed(2)}°`;
-    this._outModel.textContent = `${modelName} geomagnetic model`;
+    this._outVariation.textContent = `Variation ${fmtDeclination(declinationDeg)}`;
   }
 
   /**

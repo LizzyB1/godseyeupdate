@@ -374,7 +374,7 @@ async function main() {
         layerState: document.getElementById('radio-layer-state').textContent,
         playbackMessage: document.getElementById('radio-playback-state').textContent,
         miniStation: document.getElementById('context-radio-mini-station').textContent,
-        dataRailText: document.querySelector('[data-layer-id="radio"] .data-toggle-btn')?.textContent,
+        dataRailText: document.querySelector('[data-layer-id="radio"] .data-toggle-state')?.textContent,
         dataRailState: document.querySelector('[data-layer-id="radio"] .data-toggle-btn')?.dataset.feedState,
         dataRailLabel: document.querySelector('[data-layer-id="radio"] .data-toggle-btn')?.getAttribute('aria-label'),
         dataRailMeta: document.querySelector('[data-layer-id="radio"] .data-toggle-meta')?.textContent,

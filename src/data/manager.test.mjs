@@ -3098,3 +3098,58 @@ test('a layer that surrenders its row controls hides the block entirely', async 
     else globalThis.document = originalDocument;
   }
 });
+
+test('the toggle panel lists the heaviest layers first, whatever order they registered in', () => {
+  const originalDocument = globalThis.document;
+  globalThis.document = { createElement: makeControlElement };
+  const mgr = new DataLayerManager({});
+  // Registration order in main.js: cheap once-a-day feeds first.
+  for (const id of ['earthquakes', 'rocket-launches', 'flights', 'cctv', 'satellites']) {
+    mgr.register(makeSlowLayer(id).module);
+  }
+  mgr.register(makeSlowLayer('made-up-layer').module);
+
+  try {
+    const container = makeControlElement();
+    mgr.buildTogglePanel(container);
+    assert.deepEqual(container.children.map((row) => row.dataset.layerId), [
+      'cctv', 'satellites', 'flights', 'earthquakes', 'rocket-launches',
+      'made-up-layer',
+    ], 'unranked layers keep their registration order, below the ranked ones');
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+  }
+});
+
+test('the layer name is the toggle, and carries the state beside it', async () => {
+  const originalDocument = globalThis.document;
+  globalThis.document = { createElement: makeControlElement };
+  const mgr = new DataLayerManager({});
+  mgr.register(makeSlowLayer('flights').module);
+  const container = makeControlElement();
+
+  try {
+    mgr.buildTogglePanel(container);
+    const row = container.querySelector('[data-layer-id="flights"]');
+    assert.equal(row.querySelector('.data-toggle-state').textContent, 'OFF');
+    assert.equal(row.querySelector('.data-toggle-meta').hidden, true,
+      'an off layer without an error says nothing beyond its own name');
+
+    const toggle = row.querySelector('.data-toggle-btn');
+    assert.ok(toggle.querySelector('.data-name'), 'the name lives inside the clickable element');
+    await toggle.listeners.click();
+    assert.equal(mgr.isEnabled('flights'), true, 'clicking the name turns the layer on');
+    assert.equal(row.querySelector('.data-toggle-state').textContent, 'ON');
+    assert.equal(toggle.attributes['aria-label'], 'flights: ON');
+    assert.equal(toggle.attributes['aria-pressed'], 'true');
+    assert.equal(row.querySelector('.data-toggle-meta').hidden, false);
+
+    await toggle.listeners.click();
+    assert.equal(mgr.isEnabled('flights'), false, 'the same click target turns it back off');
+  } finally {
+    await mgr.destroyAll();
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+  }
+});

@@ -21,6 +21,7 @@
  */
 
 import { hidePanel, isPanelHidden, registerPanelLabel } from './panelVisibility.js';
+import { attachResizeHandles } from './panelResize.js';
 
 // Per a direct user ask ("allow boxes to touch the edge of the screen") —
 // was 6px; a small residual inset is kept only so the header/resize-handle
@@ -137,13 +138,6 @@ export function buildMiniBox(opts) {
     collapseBtn.textContent = collapsed ? '+' : '−';
     root.classList.toggle('is-collapsed', collapsed);
   });
-
-  const resizeHandle = document.createElement('div');
-  resizeHandle.className = cls('resize-handle');
-  resizeHandle.title = 'Drag to resize';
-  resizeHandle.setAttribute('role', 'separator');
-  resizeHandle.setAttribute('aria-label', `Resize ${title} panel`);
-  root.appendChild(resizeHandle);
 
   document.body.appendChild(root);
 
@@ -263,43 +257,34 @@ export function buildMiniBox(opts) {
     resetGeometry();
   });
 
-  let resizeStartX = 0;
-  let resizeStartY = 0;
-  let resizeStartW = 0;
-  let resizeStartH = 0;
-  const onResizeMove = (event) => {
-    const width = Math.max(minWidth, Math.min(maxWidth, resizeStartW + (event.clientX - resizeStartX)));
-    const height = Math.max(minHeight, Math.min(maxHeight, resizeStartH + (event.clientY - resizeStartY)));
-    root.style.width = `${width}px`;
-    root.style.height = `${height}px`;
-  };
-  const onResizeUp = () => {
-    window.removeEventListener('pointermove', onResizeMove);
-    window.removeEventListener('pointerup', onResizeUp);
-    window.removeEventListener('pointercancel', onResizeUp);
-    resizeHandle.classList.remove('is-active');
-    saveSize();
-    const rect = currentRect();
-    const { left, top } = clampToViewport(rect.left, rect.top, rect.width, rect.height);
-    root.style.left = `${left}px`;
-    root.style.top = `${top}px`;
-    root.style.right = 'auto';
-    root.style.bottom = 'auto';
-  };
-  resizeHandle.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    pinToLeftTop();
-    const rect = currentRect();
-    resizeStartX = event.clientX;
-    resizeStartY = event.clientY;
-    resizeStartW = rect.width;
-    resizeStartH = rect.height;
-    resizeHandle.classList.add('is-active');
-    window.addEventListener('pointermove', onResizeMove);
-    window.addEventListener('pointerup', onResizeUp);
-    window.addEventListener('pointercancel', onResizeUp);
+  // Every edge and corner, not just the bottom-right grip this box used to
+  // carry — a box parked against the right or bottom of the viewport could
+  // only be grown away from where the space actually was.
+  const resizer = attachResizeHandles(root, {
+    legacyClassName: cls('resize-handle'),
+    label: `${title} panel`,
+    onStart: () => pinToLeftTop(),
+    getRect: () => {
+      const rect = currentRect();
+      return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    },
+    getLimits: () => ({ minWidth, maxWidth, minHeight, maxHeight }),
+    onResize: ({ left, top, width, height }) => {
+      root.style.width = `${width}px`;
+      root.style.height = `${height}px`;
+      root.style.left = `${left}px`;
+      root.style.top = `${top}px`;
+    },
+    onEnd: () => {
+      saveSize();
+      const rect = currentRect();
+      const { left, top } = clampToViewport(rect.left, rect.top, rect.width, rect.height);
+      root.style.left = `${left}px`;
+      root.style.top = `${top}px`;
+      root.style.right = 'auto';
+      root.style.bottom = 'auto';
+      savePos();
+    },
   });
 
   const onWindowResize = () => {
@@ -320,9 +305,7 @@ export function buildMiniBox(opts) {
       window.removeEventListener('pointermove', onDragMove);
       window.removeEventListener('pointerup', onDragUp);
       window.removeEventListener('pointercancel', onDragUp);
-      window.removeEventListener('pointermove', onResizeMove);
-      window.removeEventListener('pointerup', onResizeUp);
-      window.removeEventListener('pointercancel', onResizeUp);
+      resizer.destroy();
       root.remove();
     },
   };
