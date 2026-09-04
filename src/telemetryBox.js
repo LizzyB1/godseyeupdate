@@ -24,7 +24,7 @@ import { getRenderGovernorDiagnostics } from './renderGovernor.js';
  * Sources are the same ones STATUS used (`DataLayerManager.getAll()`, the
  * engines' `onStatusChange` slots) — nothing here re-derives state a second
  * way, and the engine callbacks are still chained, not replaced, so
- * `bathymetryBox.js`/`mapOverlayControls.js` keep their own status lines.
+ * `bathymetryBox.js`/`contoursBox.js` keep their own status lines.
  *
  * @module telemetryBox
  */
@@ -142,7 +142,7 @@ export class TelemetryBox {
    * slot instead of reassigning it — one callback reference, not a
    * subscriber list, so replacing it would silently kill the engine's own
    * box. Both arguments are forwarded: `mapOverlays` carries `(text, phase)`
-   * and `mapOverlayControls.js`'s traffic light depends on the second.
+   * and `contoursBox.js`'s traffic light depends on the second.
    */
   _wireEngineStatus() {
     if (this._bathymetry) {

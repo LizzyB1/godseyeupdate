@@ -41,8 +41,9 @@ function clampToViewport(left, top, width, height) {
 
 /**
  * @param {Object} opts
- * @param {string} opts.idPrefix - e.g. 'mapovl' -> id="mapovl-pad", classes "mapovl-pad"/"mapovl-*".
- * @param {string} opts.storagePrefix - localStorage key prefix, e.g. 'godsEyeView.mapOverlayBox.'.
+ * @param {string} opts.idPrefix - e.g. 'camctl' -> id="camctl-pad", classes "camctl-pad"/"camctl-*".
+ * @param {string} [opts.stylePrefix=idPrefix] - Class-name prefix, when several boxes share one set of chrome styles but need distinct ids/hide keys (e.g. the contour/grid/terrain boxes all wear `mapovl` chrome).
+ * @param {string} opts.storagePrefix - localStorage key prefix, e.g. 'godsEyeView.contoursBox.'.
  * @param {string} opts.title - Header title text.
  * @param {string} [opts.ariaLabel]
  * @param {number} [opts.defaultWidth=220]
@@ -71,12 +72,13 @@ export function buildMiniBox(opts) {
     anchor = { left: '24px', bottom: 'calc(2vh + 4.5rem)' },
     onHeaderBuilt,
     hideable = true,
+    stylePrefix = idPrefix,
   } = opts;
 
-  const cls = (suffix) => `${idPrefix}-${suffix}`;
+  const cls = (suffix) => `${stylePrefix}-${suffix}`;
 
   const root = document.createElement('div');
-  root.id = cls('pad');
+  root.id = `${idPrefix}-pad`;
   root.className = cls('pad');
   root.setAttribute('role', 'group');
   root.setAttribute('aria-label', ariaLabel);

@@ -29,7 +29,7 @@ import { buildMiniBox } from './miniBox.js';
  * from the HUD's.
  *
  * Same movable/resizable/persisted-position/collapsible box mechanics as
- * `cameraControls.js`/`mapOverlayControls.js`/`coordinatesBox.js`, all
+ * `cameraControls.js`/`contoursBox.js`/`coordinatesBox.js`, all
  * built on the shared `miniBox.js` helper.
  *
  * @module hudReadoutsBox

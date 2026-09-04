@@ -338,7 +338,7 @@ export class MapOverlaysEngine {
   /**
    * @param {string} text - Human-readable status sentence.
    * @param {'offline'|'loading'|'computing'|'done'} [phase] - The
-   *   traffic-light state for `mapOverlayControls.js`'s status light:
+   *   traffic-light state for `contoursBox.js`'s status light:
    *   'offline' (red) = not rendering any contours right now (toggled
    *   off, view too wide, no renderable surface); 'loading' (orange) =
    *   blocked waiting on something external (terrain tiles streaming in);

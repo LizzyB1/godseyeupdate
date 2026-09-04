@@ -74,7 +74,7 @@ export const DEFAULT_RING_LABEL_FONT_SIZE = 13;
 export const DEFAULT_FLAG_BG_ALPHA = 0.92;
 
 /** Every mini-box / hideable-panel root id known to the app — the full set `installFlagAvoidance` checks flags against. Sourced from `panelVisibility.js`'s registry (the hideable panels) plus every `buildMiniBox` instance (not all of which are hideable), so a flag is nudged clear of ANY visible control box, not just the ones with a "×" hide button. */
-const MINIBOX_PANEL_IDS = ['restoretray-pad', 'mapovl-pad', 'coordbox-pad', 'hudread-pad', 'bathy-pad', 'camctl-pad', 'gpstrack-pad', 'about-pad', 'telemetry-pad', 'summarybox-pad', 'cachectl-pad'];
+const MINIBOX_PANEL_IDS = ['restoretray-pad', 'contourbox-pad', 'gridbox-pad', 'terrainbox-pad', 'coordbox-pad', 'hudread-pad', 'bathy-pad', 'camctl-pad', 'gpstrack-pad', 'about-pad', 'telemetry-pad', 'summarybox-pad', 'cachectl-pad'];
 const AVOIDANCE_PANEL_IDS = [...new Set([...Object.keys(PANEL_LABELS), ...MINIBOX_PANEL_IDS])];
 
 /** Shared drop-shadow label look: heavy black outline behind solid white fill, no background plaque. `weight` is the outline width in px — flags use a heavier one than the smaller ring labels so the shadow stays proportional to the text. */

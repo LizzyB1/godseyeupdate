@@ -66,11 +66,12 @@ export class AboutBox {
       'Depth flags need "Show depth contours" on, sit right on their contour line, and nudge clear of any control panel in the way.',
     ]));
 
-    body.appendChild(section('MAP OVERLAYS', [
+    body.appendChild(section('TERRAIN, CONTOURS & GRID', [
+      'Contours and Grid Lines are switched on from the layer list like any other layer; the Contours, Grid Lines and Terrain boxes only hold their settings.',
       'Chart datum (sea level) is a translucent plane at 0m elevation spanning the current view — on by default — so how much of what\'s on screen sits above or below sea level reads at a glance, no numbers needed.',
       'Height relief exaggeration makes hills/valleys more obvious — 1.0× is true scale.',
       'Line smoothing rounds off the raw computed contour line in steps — 0 is the exact line, higher numbers trade a little precision for a visibly smoother curve.',
-      'Contour flags need "Show contour lines" on to have anything to flag; each level gets one flag per edge toggled on (W/E/N/S), nudged clear of any control panel in the way.',
+      'Contour flags need the Contours layer on to have anything to flag; each level gets one flag per edge toggled on (W/E/N/S), nudged clear of any control panel in the way.',
       'A fully closed contour ring — an isolated hilltop or basin entirely inside the current view — gets its own small value label right on the ring, so a stack of rings up a hillside reads at a glance.',
       'Grid value labels show large lat/long labels on whichever grid lines are currently on screen.',
     ]));
