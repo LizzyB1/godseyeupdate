@@ -19,6 +19,28 @@ const FEED_STATE_LABELS = Object.freeze({
   unavailable: 'UNAVAILABLE',
 });
 
+/**
+ * Toggle-panel display order, heaviest first — see `_togglePanelOrder`. Ids
+ * not listed here fall to the bottom in registration order.
+ */
+const TOGGLE_PANEL_COST_ORDER = Object.freeze([
+  'cctv',                   // live video decode + per-camera frustum
+  'satellites',             // whole-catalog orbital propagation, every frame
+  'traffic',                // dense road geometry, continuous repaint
+  'ais-live-vessels',       // large live entity set over a websocket
+  'flights',                // large live entity set, interpolated between polls
+  'military',
+  'military-awareness',
+  'radio',
+  'military-installations',
+  'local-firms',
+  'bikeshare',
+  'local-datacenters',
+  'local-dams',
+  'earthquakes',
+  'rocket-launches',
+]);
+
 const SUPERSEDED_VISIBILITY_INTENT = Symbol('superseded-visibility-intent');
 const VALID_LAYER_SERIALIZATION_DISPOSITIONS = new Set([
   'enabled-only',
@@ -2018,25 +2040,41 @@ export class DataLayerManager {
     this._renderToggles();
   }
 
+  /**
+   * Panel order: heaviest layer first. Registration order is an accident of
+   * `main.js`'s import list, which put cheap once-a-day feeds (earthquakes,
+   * rocket launches) above the ones that actually cost a frame, so the first
+   * thing in reach was never the first thing worth turning off.
+   *
+   * The ranking is a UI heuristic, not a measurement: it goes by how much
+   * work each layer does per frame rather than per fetch — continuous
+   * propagation or video decode first (satellites re-propagate their whole
+   * catalog, CCTV decodes live streams), then the large continuously-updating
+   * entity sets, then polygon/point sets that are drawn once and left alone.
+   * Anything unranked keeps its registration order, below the ranked ones.
+   * @returns {Array<object>} Panel-visible layers, heaviest first.
+   */
+  _togglePanelOrder() {
+    const visible = this.getAll().filter((layer) => layer.showInTogglePanel);
+    const rank = (layer) => {
+      const index = TOGGLE_PANEL_COST_ORDER.indexOf(layer.id);
+      return index === -1 ? TOGGLE_PANEL_COST_ORDER.length : index;
+    };
+    // Index tiebreak keeps the sort stable for equal ranks across engines.
+    return visible
+      .map((layer, index) => ({ layer, index }))
+      .sort((a, b) => (rank(a.layer) - rank(b.layer)) || (a.index - b.index))
+      .map((entry) => entry.layer);
+  }
+
   _renderToggles() {
     if (!this._toggleContainer) return;
     this._toggleContainer.innerHTML = '';
 
-    for (const layer of this.getAll()) {
-      if (!layer.showInTogglePanel) continue;
+    for (const layer of this._togglePanelOrder()) {
       const row = document.createElement('div');
       row.className = 'data-toggle-row';
       row.dataset.layerId = layer.id;
-
-      const topRow = document.createElement('div');
-      topRow.className = 'data-toggle-top';
-
-      const left = document.createElement('div');
-      left.className = 'data-toggle-left';
-      left.innerHTML = `<span class="data-icon">${layer.icon}</span><span class="data-name">${layer.name}</span>`;
-
-      const right = document.createElement('div');
-      right.className = 'data-toggle-right';
 
       const count = document.createElement('span');
       count.className = 'data-count';
@@ -2063,8 +2101,24 @@ export class DataLayerManager {
       });
       this._syncRetryButton(retry, layer);
 
+      // The whole name line IS the toggle — there is no separate on/off
+      // control beside it. Everything that used to stack up in the row
+      // (icon, name, count, state) now sits on that one line.
       const toggle = document.createElement('button');
-      toggle.className = `data-toggle-btn${layer.enabled ? ' active' : ''}`;
+      toggle.type = 'button';
+      toggle.className = 'data-toggle-btn';
+      const icon = document.createElement('span');
+      icon.className = 'data-icon';
+      icon.textContent = layer.icon;
+      const name = document.createElement('span');
+      name.className = 'data-name';
+      name.textContent = layer.name;
+      const state = document.createElement('span');
+      state.className = 'data-toggle-state';
+      toggle.appendChild(icon);
+      toggle.appendChild(name);
+      toggle.appendChild(count);
+      toggle.appendChild(state);
       this._syncToggleButton(toggle, layer);
       toggle.addEventListener('click', async () => {
         toggle.disabled = true;
@@ -2077,18 +2131,14 @@ export class DataLayerManager {
         }
       });
 
-      right.appendChild(count);
-      right.appendChild(retry);
-      right.appendChild(toggle);
-      topRow.appendChild(left);
-      topRow.appendChild(right);
+      const meta = document.createElement('span');
+      meta.className = 'data-toggle-meta';
+      meta.textContent = this._buildMetaText(layer);
+      this._syncMeta(meta, layer);
 
-      const bottomRow = document.createElement('div');
-      bottomRow.className = 'data-toggle-meta';
-      bottomRow.textContent = this._buildMetaText(layer);
-
-      row.appendChild(topRow);
-      row.appendChild(bottomRow);
+      row.appendChild(toggle);
+      row.appendChild(retry);
+      row.appendChild(meta);
 
       // Optional per-layer sub-controls (chips + color legend). The click
       // listener is delegated and attached once here, so it survives
@@ -2228,10 +2278,25 @@ export class DataLayerManager {
       const meta = row.querySelector('.data-toggle-meta');
       if (meta) {
         meta.textContent = this._buildMetaText(layer);
+        this._syncMeta(meta, layer);
       }
 
       this._syncRowControls(row.querySelector('.data-toggle-controls'), layer);
     }
+  }
+
+  /**
+   * The source/age line is only worth a row's width when it is telling you
+   * something: an off layer's "never updated" is noise, but its error, if it
+   * has one, is not.
+   * @param {HTMLElement} meta The row's `.data-toggle-meta` node.
+   * @param {object} layer Registered layer entry.
+   */
+  _syncMeta(meta, layer) {
+    const stats = layer.stats || {};
+    const hasProblem = Boolean(stats.error || stats.lastError || stats.managerRefreshError
+      || layer.lifecycleUncertain);
+    meta.hidden = !layer.enabled && !hasProblem;
   }
 
   _buildMetaText(layer) {
@@ -2314,10 +2379,16 @@ export class DataLayerManager {
       ? layer.lifecycleState
       : (uncertain ? 'uncertain' : feedState);
     button.disabled = transitioning;
-    button.textContent = transitioning
+    const stateText = transitioning
       ? layer.lifecycleState.toUpperCase()
       : (uncertain ? 'UNCERTAIN' : (layer.enabled ? FEED_STATE_LABELS[feedState] : 'OFF'));
-    button.setAttribute('aria-label', `${layer.name}: ${button.textContent}`);
+    // The button is the whole name line now, so the state label lives in its
+    // own span rather than being the button's entire text.
+    const stateEl = button.querySelector?.('.data-toggle-state');
+    if (stateEl) stateEl.textContent = stateText;
+    else button.textContent = stateText;
+    button.setAttribute('aria-pressed', layer.enabled ? 'true' : 'false');
+    button.setAttribute('aria-label', `${layer.name}: ${stateText}`);
   }
 
   _formatCount(n) {

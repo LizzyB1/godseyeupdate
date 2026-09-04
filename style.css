@@ -4371,9 +4371,19 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   border-radius: 999px;
 }
 
+/* One line per layer, laid out like a .statusbox-row: the name IS the
+   toggle, the state sits at the end of the same line, and the source/age
+   line only appears when it has something to say (manager.js `_syncMeta`).
+   Padding is down to what keeps the rows from touching. */
 .data-toggle-row {
-  padding: 3px 5px 2px;
-  border-radius: 6px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 4px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 5px;
+  border-left: 2px solid var(--glass-border);
   transition: background var(--transition-fast);
 }
 
@@ -5696,20 +5706,6 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72), 0 0 18px rgba(255, 255, 255, 0.18);
 }
 
-.data-toggle-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 5px;
-}
-
-.data-toggle-left {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-
 .data-icon {
   font-size: 12px;
   line-height: 1;
@@ -5717,6 +5713,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 }
 
 .data-name {
+  flex: 1 1 auto;
   font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 500;
@@ -5725,16 +5722,11 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.data-toggle-right {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
+  text-align: left;
 }
 
 .data-count {
+  flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.3px;
@@ -5748,6 +5740,8 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 }
 .data-retry-btn {
   display: flex;
+  flex: 0 0 auto;
+  align-self: center;
   align-items: center;
   justify-content: center;
   width: 16px;
@@ -5772,72 +5766,72 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   to { transform: rotate(360deg); }
 }
 
+/* The row itself: an unadorned line of text you click, not a control with
+   a chrome plate around it. On reads bold and full-strength; off is the
+   same line, quiet. */
 .data-toggle-btn {
-  padding: 2px 6px;
-  font-family: var(--font-mono);
-  font-size: 8.5px;
-  letter-spacing: 0.9px;
-  color: var(--text-dim);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 4px;
+  background: none;
+  border: 0;
+  border-radius: 5px;
   cursor: pointer;
-  transition: all var(--transition-fast);
   outline: none;
-  min-width: 32px;
-  text-align: center;
+  opacity: 0.5;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
 }
 
-.data-toggle-btn.feed-loading,
-.data-toggle-btn.feed-degraded,
-.data-toggle-btn.feed-stale,
-.data-toggle-btn.feed-fallback,
-.data-toggle-btn.feed-unavailable {
-  min-width: 68px;
-  letter-spacing: 0.5px;
-}
-
-.data-toggle-btn:hover {
-  border-color: var(--glass-border-hover);
-  background: rgba(255, 255, 255, 0.06);
-}
+.data-toggle-btn:hover { opacity: 0.85; }
+.data-toggle-btn:focus-visible { box-shadow: 0 0 0 1px var(--accent); }
 
 .data-toggle-btn.active {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-dim);
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.15);
+  opacity: 1;
+}
+.data-toggle-btn.active .data-name {
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 10px var(--accent-glow);
 }
 
-.data-toggle-btn.active.feed-stale,
-.data-toggle-btn.active.feed-fallback {
+.data-toggle-state {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  color: var(--text-dim);
+}
+.data-toggle-btn.active .data-toggle-state { color: var(--accent); }
+.data-toggle-btn.feed-loading .data-toggle-state,
+.data-toggle-btn.feed-degraded .data-toggle-state,
+.data-toggle-btn.feed-stale .data-toggle-state,
+.data-toggle-btn.feed-fallback .data-toggle-state,
+.data-toggle-btn.feed-unavailable .data-toggle-state,
+.data-toggle-btn.lifecycle-uncertain .data-toggle-state {
+  letter-spacing: 0.5px;
   color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.75);
-  background: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.12);
+}
+/* Feed trouble colours the row's left rail, as it does in the status box,
+   instead of repainting a button. */
+.data-toggle-row:has(.data-toggle-btn.feed-degraded),
+.data-toggle-row:has(.data-toggle-btn.feed-stale),
+.data-toggle-row:has(.data-toggle-btn.feed-fallback),
+.data-toggle-row:has(.data-toggle-btn.feed-unavailable),
+.data-toggle-row:has(.data-toggle-btn.lifecycle-uncertain) {
+  border-left-color: #ffffff;
 }
 
-.data-toggle-btn.active.feed-degraded {
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.78);
-  background: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.12);
-}
-
-.data-toggle-btn.active.feed-unavailable {
-  color: #ffffff;
-  border-color: rgba(0, 0, 0, 0.78);
-  background: rgba(0, 0, 0, 0.1);
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.12);
-}
-
+.data-toggle-meta[hidden] { display: none; }
 .data-toggle-meta {
+  flex: 1 1 100%;
   font-family: var(--font-mono);
   font-size: 9px;
   letter-spacing: 0.3px;
   color: var(--text-dim);
-  padding-left: 17px;
-  margin-top: 1px;
+  padding: 0 4px 2px 21px;
 }
 
 /* Optional per-layer sub-controls: mode chips plus a color legend. Aligned
@@ -5845,11 +5839,11 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
    grow without widening the rail. */
 .data-toggle-controls {
   display: flex;
+  flex: 1 1 100%;
   flex-wrap: wrap;
   align-items: center;
   gap: 3px 6px;
-  padding-left: 17px;
-  margin-top: 3px;
+  padding: 0 4px 2px 21px;
 }
 
 .data-toggle-controls[hidden] {
@@ -10007,6 +10001,31 @@ body.scene-playback-mode #first-run-launcher {
 }
 .gev-panel-dragging .gev-panel-grip { cursor: grabbing; }
 
+/* ── Eight-way resize handles (src/panelResize.js) ──────────────────────
+   Every edge and corner of every mini-box and undockable HUD panel. Only
+   the south-east handle carries a visible grip: it also keeps each box's
+   own legacy `.<prefix>-resize-handle` class, so the corner decoration
+   those rules already draw is unchanged. The other seven are invisible
+   hit strips — the cursor is the affordance. */
+.panel-resize-handle {
+  position: absolute;
+  z-index: 4;
+  touch-action: none;
+}
+.panel-resize-handle--n { top: 0; left: 8px; right: 8px; height: 5px; }
+.panel-resize-handle--s { bottom: 0; left: 8px; right: 8px; height: 5px; }
+.panel-resize-handle--w { left: 0; top: 8px; bottom: 8px; width: 5px; }
+.panel-resize-handle--e { right: 0; top: 8px; bottom: 8px; width: 5px; }
+.panel-resize-handle--nw { top: 0; left: 0; width: 12px; height: 12px; }
+.panel-resize-handle--ne { top: 0; right: 0; width: 12px; height: 12px; }
+.panel-resize-handle--sw { bottom: 0; left: 0; width: 12px; height: 12px; }
+.panel-resize-handle--se { bottom: 0; right: 0; width: 16px; height: 16px; }
+/* The header owns pointerdown for dragging; its own edge strips must still
+   resize, so they sit above it. */
+.panel-resize-handle--n,
+.panel-resize-handle--nw,
+.panel-resize-handle--ne { z-index: 5; }
+
 .gev-panel-resize-handle {
   position: absolute;
   top: 0;
@@ -10036,7 +10055,9 @@ body.scene-playback-mode #first-run-launcher {
 
 @media (max-width: 720px), (max-height: 520px) {
   .gev-panel-grip,
-  .gev-panel-resize-handle { display: none; }
+  .gev-panel-resize-handle,
+  #left-panel-stack .panel-resize-handle,
+  #right-context-rail .panel-resize-handle { display: none; }
 }
 
 /* ── Settings dialog (src/settingsDialog.js) ──────────────────────────────
@@ -11504,26 +11525,22 @@ body.scene-playback-mode #first-run-launcher {
   fill: var(--accent);
 }
 
-.compassbox-legend {
+/* Heading needle: where the CAMERA is facing. Longest of the three and
+   drawn in the panel's foreground white so it reads over the ring it
+   turns against, while the two north needles stay the reference pair. */
+.compassbox-heading-needle {
+  fill: var(--text-primary);
+}
+
+/* The box's only text: variation, on the panel's own glass, no plate of
+   its own behind it. */
+.compassbox-readout {
   flex: 0 0 auto;
-  display: flex;
-  gap: 12px;
-  font: 600 9px/1 var(--font-mono);
+  font: 600 10px/1 var(--font-mono);
+  letter-spacing: 0.06em;
   color: var(--text-secondary);
+  opacity: 0.8;
 }
-.compassbox-legend-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.compassbox-swatch {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-}
-.compassbox-swatch-true { background: var(--text-dim); opacity: 0.75; }
-.compassbox-swatch-mag { background: var(--accent); }
 
 .compassbox-resize-handle {
   position: absolute;

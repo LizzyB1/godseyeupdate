@@ -46,6 +46,8 @@
  * @module panelDrag
  */
 
+import { attachResizeHandles } from './panelResize.js';
+
 const STORAGE_PREFIX = 'godsEyeView.panelDragV1.';
 const EDGE_INSET = 6;
 /** Undocked panels float in [Z_BASE, Z_MAX] — above the base HUD panel band
@@ -53,6 +55,8 @@ const EDGE_INSET = 6;
  * exit control (300). */
 const Z_BASE = 120;
 const Z_MAX = 149;
+/** Floor for the vertical handles, which only apply to an undocked panel. */
+const MIN_UNDOCKED_HEIGHT = 90;
 
 function clampToViewport(left, top, rect) {
   const maxLeft = Math.max(EDGE_INSET, window.innerWidth - rect.width - EDGE_INSET);
@@ -78,10 +82,11 @@ class DraggablePanel {
    * @param {PanelDragManager} manager
    * @param {{varName:string,min:number,max:number}|null} resize - Width-resize config: the
    *   panel's own CSS custom property that controls its expanded width (e.g.
-   *   `--panel-expanded-width`), and the px bounds to clamp it to. Height is
-   *   deliberately not resizable — while docked it's owned every layout pass
-   *   by ui.js's adaptive corridor engine (`--left-panel-allocated-height`),
-   *   which would silently overwrite a manual height a frame later.
+   *   `--panel-expanded-width`), and the px bounds to clamp it to. Height
+   *   follows the vertical handles only once the panel is undocked — while
+   *   docked it's owned every layout pass by ui.js's adaptive corridor engine
+   *   (`--left-panel-allocated-height`), which would silently overwrite a
+   *   manual height a frame later.
    */
   constructor(id, panelEl, gripEl, manager, resize = null) {
     this.id = id;
@@ -113,42 +118,38 @@ class DraggablePanel {
   }
 
   _installResizeHandle() {
-    const handle = document.createElement('div');
-    handle.className = 'gev-panel-resize-handle';
-    handle.title = 'Drag to resize width';
-    handle.setAttribute('role', 'separator');
-    handle.setAttribute('aria-orientation', 'vertical');
-    handle.setAttribute('aria-label', `Resize ${this.id} panel width`);
-    this.el.appendChild(handle);
-
-    let startX = 0;
-    let startWidth = 0;
-
-    const onMove = (event) => {
-      const delta = event.clientX - startX;
-      const width = Math.max(this.resize.min, Math.min(this.resize.max, startWidth + delta));
-      this.el.style.setProperty(this.resize.varName, `${Math.round(width)}px`);
-    };
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      handle.classList.remove('is-active');
-      const width = parseFloat(getComputedStyle(this.el).getPropertyValue(this.resize.varName));
-      if (Number.isFinite(width)) {
-        try { localStorage.setItem(this._widthStorageKey(), String(Math.round(width))); } catch { /* storage unavailable */ }
-      }
-    };
-    handle.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      event.stopPropagation();
-      startX = event.clientX;
-      startWidth = this.el.getBoundingClientRect().width;
-      handle.classList.add('is-active');
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onUp);
+    attachResizeHandles(this.el, {
+      legacyClassName: 'gev-panel-resize-handle',
+      legacyDir: 'e',
+      label: `${this.id} panel`,
+      getRect: () => {
+        const rect = this.el.getBoundingClientRect();
+        return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+      },
+      getLimits: () => ({
+        minWidth: this.resize.min,
+        maxWidth: this.resize.max,
+        minHeight: MIN_UNDOCKED_HEIGHT,
+        maxHeight: window.innerHeight,
+      }),
+      onResize: ({ left, top, width, height }, dir) => {
+        if (dir.includes('e') || dir.includes('w')) {
+          this.el.style.setProperty(this.resize.varName, `${Math.round(width)}px`);
+        }
+        // A docked panel's height and position belong to ui.js's layout
+        // engine; only its width is ours to set.
+        if (!this.undocked) return;
+        if (dir.includes('n') || dir.includes('s')) this.el.style.height = `${Math.round(height)}px`;
+        if (dir.includes('w')) this.el.style.left = `${Math.round(left)}px`;
+        if (dir.includes('n')) this.el.style.top = `${Math.round(top)}px`;
+      },
+      onEnd: () => {
+        const width = parseFloat(getComputedStyle(this.el).getPropertyValue(this.resize.varName));
+        if (Number.isFinite(width)) {
+          try { localStorage.setItem(this._widthStorageKey(), String(Math.round(width))); } catch { /* storage unavailable */ }
+        }
+        if (this.undocked) this._save();
+      },
     });
   }
 
@@ -187,6 +188,7 @@ class DraggablePanel {
     if (!this.undocked) return;
     this.undocked = false;
     this.el.classList.remove('gev-panel-undocked');
+    this.el.style.removeProperty('height');
     this.el.style.removeProperty('position');
     this.el.style.removeProperty('left');
     this.el.style.removeProperty('top');
