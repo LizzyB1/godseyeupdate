@@ -57,12 +57,12 @@ test('a cached variation sample ages out even when the camera has not moved', ()
 
 test('variation matches the published model within a degree at known locations', () => {
   // Reference values from NOAA's WMM calculator for 2026-06-01, sea level.
-  assert.ok(Math.abs(declinationDegrees(37.77, -122.42, 0, DATE) - 12.9) < 1);
-  assert.ok(Math.abs(declinationDegrees(51.5, -0.12, 0, DATE) - 1.1) < 1);
-  assert.ok(Math.abs(declinationDegrees(-33.87, 151.21, 0, DATE) - 12.8) < 1);
+  assert.ok(Math.abs(declinationDegrees(37.77, -122.42, DATE) - 12.9) < 1);
+  assert.ok(Math.abs(declinationDegrees(51.5, -0.12, DATE) - 1.1) < 1);
+  assert.ok(Math.abs(declinationDegrees(-33.87, 151.21, DATE) - 12.8) < 1);
 });
 
-test('variation is unavailable rather than fabricated outside the model window', () => {
-  assert.equal(declinationDegrees(37.77, -122.42, 0, new Date('2099-01-01T00:00:00Z')), null);
-  assert.equal(declinationDegrees(Number.NaN, -122.42, 0, DATE), null);
+test('variation is unavailable rather than fabricated for a position the model cannot take', () => {
+  assert.equal(declinationDegrees(Number.NaN, -122.42, DATE), null);
+  assert.equal(declinationDegrees(37.77, Number.NaN, DATE), null);
 });

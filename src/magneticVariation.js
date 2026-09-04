@@ -1,4 +1,4 @@
-import geomagnetism from 'geomagnetism';
+import { getMagneticDeclination } from './data/magneticDeclination.js';
 
 /**
  * @file Magnetic variation (declination) for the camera orientation readout.
@@ -6,15 +6,16 @@ import geomagnetism from 'geomagnetism';
  * A compass heading is only meaningful against a stated reference: Cesium
  * reports heading relative to true north, while a handheld/aircraft compass
  * reads relative to magnetic north. The difference — variation, east
- * positive — comes from the World Magnetic Model (`geomagnetism`, WMM
- * coefficients), evaluated at the camera's own ground position and the
- * current date, since it varies by both.
+ * positive — comes from the World Magnetic Model via
+ * `data/magneticDeclination.js`, the same wrapper the Compass mini-box
+ * uses, evaluated at the camera's own ground position.
  *
- * Evaluating the spherical-harmonic model is far too expensive to run on
- * every rendered frame, and variation changes by well under a tenth of a
- * degree over a few kilometres, so `declinationDegrees` caches the last
- * result and only recomputes once the sample point has moved appreciably or
- * the cache has aged out.
+ * That box recomputes on a debounced `moveEnd`; this readout is driven from
+ * `postRender`, so it needs its own guard against evaluating the model
+ * every frame. Variation changes by well under a tenth of a degree over a
+ * few kilometres, so `declinationDegrees` caches the last result and only
+ * recomputes once the sample point has moved appreciably or the cache has
+ * aged out.
  *
  * @module magneticVariation
  */
@@ -76,30 +77,17 @@ let cachedSample = null;
  * is safe to call every rendered frame.
  * @param {number} latitude - degrees.
  * @param {number} longitude - degrees.
- * @param {number} [heightM] - height above the ellipsoid, metres.
  * @param {Date} [date]
- * @returns {?number} null outside the model's validity window or for a bad position.
+ * @returns {?number} null when the model cannot be evaluated for this position/date.
  */
-export function declinationDegrees(latitude, longitude, heightM = 0, date = new Date()) {
+export function declinationDegrees(latitude, longitude, date = new Date()) {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
   const nowMs = date.getTime();
   if (!declinationSampleStale(cachedSample, latitude, longitude, nowMs)) {
     return cachedSample.declination;
   }
-  let declination = null;
-  try {
-    // The model takes kilometres above the ellipsoid; the camera can sit far
-    // above the WMM's intended altitude band, so clamp rather than
-    // extrapolate — variation at the sub-satellite point is what the readout
-    // is describing anyway.
-    const altitudeKm = Math.min(600, Math.max(0, (Number.isFinite(heightM) ? heightM : 0) / 1000));
-    declination = geomagnetism.model(date).point([latitude, longitude, altitudeKm]).decl;
-  } catch {
-    // Out of the bundled model's validity window — the readout falls back to
-    // true north rather than reporting a made-up variation.
-    declination = null;
-  }
-  if (!Number.isFinite(declination)) declination = null;
+  const sample = getMagneticDeclination(latitude, longitude, date);
+  const declination = sample ? sample.declinationDeg : null;
   cachedSample = { latitude, longitude, sampledMs: nowMs, declination };
   return declination;
 }

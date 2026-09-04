@@ -766,7 +766,6 @@ export class CameraControls {
       ? declinationDegrees(
         Cesium.Math.toDegrees(carto.latitude),
         Cesium.Math.toDegrees(carto.longitude),
-        carto.height,
       )
       : null;
     const magneticDeg = magneticHeadingDegrees(trueHeadingDeg, variationDeg);
