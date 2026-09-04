@@ -2635,6 +2635,54 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
   font-size: 7px;
   letter-spacing: 0.16em;
 }
+/* Operator logo, type silhouette and airframe photo under the callsign. */
+.cockpit-ident {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.cockpit-ident-logo,
+.cockpit-ident-silhouette {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.65));
+}
+.cockpit-ident-photo {
+  position: relative;
+  display: block;
+  line-height: 0;
+  border: 1px solid color-mix(in srgb, var(--ident-accent, #cfe9f5) 55%, transparent);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cockpit-ident-photo img {
+  display: block;
+  width: 88px;
+  height: 34px;
+  object-fit: cover;
+}
+/* Planespotters require the photographer visible beside the image. */
+.cockpit-ident-photo small {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 1px 3px;
+  background: rgba(0, 0, 0, 0.62);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 6px;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cockpit-ident-operator {
+  color: color-mix(in srgb, var(--ident-accent, #cfe9f5) 78%, white);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
 .cockpit-mode-chip {
   margin-top: 2px;
   padding: 7px 11px;

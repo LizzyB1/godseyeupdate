@@ -23,6 +23,7 @@ import {
   vesselOverlayCohortLimit,
   normalizeVesselType,
 } from './vesselLabels.js';
+import { vesselIconSvg, vesselShapeId } from './vesselIcons.js';
 import {
   clearOverlaySource,
   hitTestWorldOverlay,
@@ -1274,23 +1275,21 @@ function vesselCourseDeg(record) {
 /**
  * Build (and cache) a chevron/delta-wing SVG data URL tinted for the vessel.
  * The shape points north (up) so billboard rotation maps directly to heading.
- * One icon is generated per color+variant and reused across all billboards.
- * @param {Object} record - Vessel record (drives per-type tint).
+ * One icon is generated per shape+color+variant and reused across all
+ * billboards, so a harbour full of tugs still costs a single raster.
+ * @param {Object} record - Vessel record (drives per-type shape and tint).
  * @param {boolean} selected - True for the white/brighter selected variant.
  * @returns {string} SVG data URL.
  */
 function shipIcon(record, selected) {
   const cssColor = selected ? '#ffffff' : vesselTypeCss(record.type);
-  const key = `${cssColor}:${selected ? 'selected' : 'normal'}`;
+  const shape = vesselShapeId(record.type);
+  const key = `${shape}:${cssColor}:${selected ? 'selected' : 'normal'}`;
   if (shipIconCache.has(key)) return shipIconCache.get(key);
 
   const stroke = selected ? 'rgba(6,26,32,0.95)' : 'rgba(4,18,24,0.9)';
   const strokeWidth = selected ? 1.1 : 0.7;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-    <g transform="translate(16,16)">
-      <path d="M0,-14 L11,10 L4,7 L0,14 L-4,7 L-11,10 Z" fill="${cssColor}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linejoin="round"/>
-    </g>
-  </svg>`;
+  const svg = vesselIconSvg(record.type, cssColor, { stroke, strokeWidth });
   const icon = 'data:image/svg+xml;base64,' + btoa(svg);
   shipIconCache.set(key, icon);
   return icon;

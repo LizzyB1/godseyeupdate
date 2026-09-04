@@ -50,6 +50,20 @@ export const DATA_CREDITS = [
       '(public domain)',
   },
   {
+    key: 'planespotters',
+    html:
+      'Tracked aircraft photos: ' +
+      '<a href="https://www.planespotters.net/photo/api" target="_blank" rel="noopener">Planespotters.net</a> ' +
+      '(each photo credited to its photographer and linked to its photo page)',
+  },
+  {
+    key: 'soaring-symbols',
+    html:
+      'Airline logos: ' +
+      '<a href="https://github.com/soaring-symbols/soaring-symbols" target="_blank" rel="noopener">Soaring Symbols</a> ' +
+      '(MIT; marks remain the airlines\u2019 trademarks)',
+  },
+  {
     key: 'aisstream',
     html:
       'Live vessels (AIS): ' +

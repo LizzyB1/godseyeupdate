@@ -68,6 +68,7 @@ Static datasets shipped in the repo for an out-of-the-box experience. **None are
 | **Natural Earth physical regions** (1,046 land + 292 marine named polygons) | `natural_earth/` | **Public domain** | ✅ (no restrictions) | "Made with Natural Earth" (courtesy credit — not legally required) |
 | **DataSF Analysis Neighborhoods** (41 SF neighborhood polygons) | `neighborhoods/` | **PDDL 1.0** (public domain) | ✅ (no restrictions) | "City & County of San Francisco — DataSF" (courtesy — not legally required) |
 | **OurAirports** (9,258 routable airports, 18,474 codes, 249 countries) | `airports.json` | **Public domain** | ✅ (no restrictions) | "OurAirports — ourairports.com/data" (courtesy — not legally required) |
+| **Soaring Symbols airline logos** (93 airlines, 186 codes) | `airlineLogos.json` | **MIT** (the collection; the marks stay airline trademarks) | ⚠️ (MIT on the files; trademark use is nominative only — identifying the operator of a flight) | "Soaring Symbols — github.com/soaring-symbols/soaring-symbols" |
 
 ### ⚠️ TeleGeography is bundled but NonCommercial
 
@@ -110,6 +111,22 @@ stored as positional records with a code index, which keeps it around 600 KB. Th
 layer imports it dynamically, so it only downloads once a route needs resolving.
 Re-run the script to refresh it; OurAirports is community-maintained and its coverage of
 small fields varies.
+
+### Soaring Symbols airline logos (`airlineLogos.json`)
+
+The operator logo beside a tracked aircraft's callsign. Built by
+`scripts/build-airline-logos.mjs` from the MIT-licensed Soaring Symbols collection
+(https://github.com/soaring-symbols/soaring-symbols): the square `icon.svg` per airline
+(falling back to the mono icon or the wordmark for the fifth of them that publish only
+one), minified and indexed by ICAO and IATA code, ~240 KB dynamically imported the first
+time a callsign resolves. The MIT licence covers the files, not the marks: they are shown
+only to identify who operates a flight, which is nominative use, and they carry no
+endorsement by or affiliation with the airlines.
+
+Aircraft photos are **not** bundled: Planespotters' API terms allow caching their JSON for
+24 hours (which `src/data/aircraftPhotos.js` does, in `localStorage`) but forbid storing,
+proxying or rewriting the images themselves, so the photo loads from their URL, shows the
+photographer's name and links to its photo page — and no photo appears offline.
 
 ### Natural Earth physical regions (`natural_earth/`)
 

@@ -10,6 +10,9 @@ import {
   enterCockpitWithTracking,
 } from './cockpitTracking.js';
 import { shortAirportName } from './data/airportLookup.js';
+import { aircraftIdentity, identitySignature } from './data/aircraftIdentity.js';
+import { describeAirline } from './data/airlineLogos.js';
+import { fetchAircraftPhoto } from './data/aircraftPhotos.js';
 import { IntelHUD } from './hud.js';
 import { initHudReadoutsBox } from './hudReadoutsBox.js';
 import { initSummaryBox } from './summaryBox.js';
@@ -623,6 +626,15 @@ class CockpitViewController {
     this.clock = document.getElementById('cockpit-clock');
     this.position = document.getElementById('cockpit-position');
     this.aircraftMeta = document.getElementById('cockpit-aircraft-meta');
+    this.ident = document.getElementById('cockpit-ident');
+    this.identLogo = document.getElementById('cockpit-ident-logo');
+    this.identSilhouette = document.getElementById('cockpit-ident-silhouette');
+    this.identPhoto = document.getElementById('cockpit-ident-photo');
+    this.identPhotoImage = document.getElementById('cockpit-ident-photo-image');
+    this.identPhotoCredit = document.getElementById('cockpit-ident-photo-credit');
+    this.identOperator = document.getElementById('cockpit-ident-operator');
+    this.identSignature = '';
+    this.identRequestKey = '';
     this.route = document.getElementById('cockpit-route');
     this.routeFrom = document.getElementById('cockpit-route-from');
     this.routeFromCountry = document.getElementById('cockpit-route-from-country');
@@ -1395,6 +1407,7 @@ class CockpitViewController {
         : (this.surfaceFallback ? 'SURFACE FALLBACK' : (info.stale ? 'STALE FEED' : 'LIVE TRACK'));
       this.aircraftMeta.textContent = `${info.layerId === 'military' ? 'MILITARY' : 'COMMERCIAL'} · ${feedState} · COURSE ALIGNED`;
     }
+    this.updateIdentity(info);
     this.updateRoute(info);
     if (forceContext
       || cockpitUiUpdateDue(nowMs, this.lastContextUpdateMs, COCKPIT_CONTEXT_UPDATE_MS)) {
@@ -1404,6 +1417,59 @@ class CockpitViewController {
       this.updateContext(info, heading);
     }
     if (this.hud) this.hud.dataset.layer = info.layerId || 'flights';
+  }
+
+  /**
+   * Paint the operator logo, type silhouette and airframe photo for the
+   * tracked aircraft. The logo pack and the photo both resolve asynchronously,
+   * so this asks for them once per airframe and repaints from the caches on the
+   * next HUD tick — a pending lookup never blocks the readout, and a resolved
+   * one costs one signature comparison per frame.
+   * @param {object} info Tracked-aircraft info.
+   */
+  updateIdentity(info) {
+    if (!this.ident) return;
+    const key = String(info?.icao24 || info?.callsign || '');
+    if (key && key !== this.identRequestKey) {
+      this.identRequestKey = key;
+      // Fire and forget: both resolve into their own caches, and the next tick
+      // reads them. Neither rejects.
+      describeAirline(info?.callsign);
+      fetchAircraftPhoto({ icao24: info?.icao24, registration: info?.registration });
+    }
+
+    const identity = aircraftIdentity(info);
+    const signature = identitySignature(identity);
+    if (signature === this.identSignature) return;
+    this.identSignature = signature;
+
+    if (this.identLogo) {
+      this.identLogo.hidden = !identity.logo;
+      if (identity.logo) {
+        this.identLogo.src = identity.logo;
+        this.identLogo.alt = identity.operator ? `${identity.operator} logo` : '';
+      }
+    }
+    if (this.identSilhouette) {
+      // The silhouette is the always-available layer, so it stands in whenever
+      // there is no photo of this airframe rather than competing with one.
+      this.identSilhouette.hidden = Boolean(identity.photo);
+      this.identSilhouette.src = identity.silhouette;
+      this.identSilhouette.alt = `${identity.klass} silhouette`;
+    }
+    if (this.identPhoto && this.identPhotoImage && this.identPhotoCredit) {
+      // Planespotters' terms: their URL loaded directly, the photographer's
+      // name visible beside it, and the thumbnail linking to the photo page.
+      this.identPhoto.hidden = !identity.photo;
+      if (identity.photo) {
+        this.identPhoto.href = identity.photo.link;
+        this.identPhotoImage.src = identity.photo.thumbnail;
+        this.identPhotoCredit.textContent = `© ${identity.photo.photographer} · Planespotters`;
+      }
+    }
+    if (this.identOperator) this.identOperator.textContent = identity.operator;
+    this.ident.hidden = !(identity.operator || identity.silhouette || identity.photo);
+    this.ident.style.setProperty('--ident-accent', identity.color);
   }
 
   updateRoute(info) {

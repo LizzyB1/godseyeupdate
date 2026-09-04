@@ -257,12 +257,16 @@ const TRACKED_RASTER_PX = 192;
  *  Default size serves the fleet; pass `aircraftIcon(kind, TRACKED_ICON_PX)`
  *  (re-exported below) for the tracked billboard. */
 export const TRACKED_ICON_PX = TRACKED_RASTER_PX;
-export function aircraftIcon(kind, px = FLEET_RASTER_PX) {
+export function aircraftIcon(kind, px = FLEET_RASTER_PX, tint = '') {
   const k = BODIES[kind] ? kind : 'airliner';
-  const key = `${k}@${px}`;
+  const key = `${k}@${px}${tint ? `:${tint}` : ''}`;
   let uri = _iconCache.get(key);
   if (!uri) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${VIEW} ${VIEW}"><g transform="translate(${C},${C})">${BODIES[k]}</g></svg>`;
+    // Billboards tint through Cesium's `billboard.color`, so they take the
+    // white glyph; a plain <img> in the HUD cannot, so it asks for the colour
+    // here — the airline's brand hue over the type's planform.
+    const body = tint ? BODIES[k].replaceAll('fill="white"', `fill="${tint}"`) : BODIES[k];
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${VIEW} ${VIEW}"><g transform="translate(${C},${C})">${body}</g></svg>`;
     uri = 'data:image/svg+xml;base64,' + _b64(svg);
     _iconCache.set(key, uri);
   }
