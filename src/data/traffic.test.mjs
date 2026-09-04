@@ -7,6 +7,7 @@
 // that contract; the layer's getStats() is a thin caller.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import trafficLayer, {
   deriveTrafficFlowError,
   trafficFeedPresentation,
@@ -142,6 +143,17 @@ test('the manager reads keyless as FALLBACK and an outage as DEGRADED', () => {
     }),
     'degraded',
   );
+});
+
+test('disable() clears the in-flight claim it just orphaned', () => {
+  // `disable()` bumps `_loadGeneration`, which makes the running load's own
+  // `finally` skip `_fetching = false` — so disable has to clear it itself
+  // or getStats() reports a switched-off layer as loading forever.
+  const source = readFileSync(new URL('./traffic.js', import.meta.url), 'utf8');
+  const disableBody = source.slice(source.indexOf('  disable(viewer) {'));
+  const bumpAt = disableBody.indexOf('_loadGeneration++');
+  const clearAt = disableBody.indexOf('_fetching = false');
+  assert.ok(bumpAt > -1 && clearAt > bumpAt, 'disable() must clear _fetching after bumping the generation');
 });
 
 test('the shipped layer boots keyless-honest before any status check', () => {

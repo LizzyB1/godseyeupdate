@@ -15,7 +15,14 @@ export function normalizeLayerLoading(layer = {}) {
   const lifecycleState = String(layer.lifecycleState || (layer.enabled ? 'enabled' : 'disabled'));
   const status = String(stats.status || '').toLowerCase();
   const disabling = lifecycleState === 'disabling';
-  const loading = lifecycleState === 'enabling' || disabling || stats.loading === true || stats.refreshing === true;
+  // An off layer is never "loading", whatever its own stats still say: a
+  // module whose in-flight work was cancelled by `disable()` can leave a
+  // loading/refreshing flag set, and the banner would then announce
+  // "LOADING Street Traffic" for a layer the user has switched off.
+  const off = lifecycleState === 'disabled' || (layer.enabled === false && lifecycleState !== 'enabling');
+  const loading = lifecycleState === 'enabling'
+    || disabling
+    || (!off && (stats.loading === true || stats.refreshing === true));
   const count = finiteCount(stats.count);
   const error = stats.error || stats.lastError || stats.managerRefreshError || null;
   const unavailable = stats.unavailable === true

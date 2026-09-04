@@ -2350,6 +2350,12 @@ const trafficLayer = {
     _enableKickTimer = null;
     cancelActiveFetch();
     _loadGeneration++;
+    // Bumping the generation above makes the in-flight load's `finally`
+    // skip its own `_fetching = false` (it guards on generation, so a
+    // superseding load's claim survives). With no successor load to clear
+    // it, the flag would stay true for the rest of the session and
+    // `getStats()` would keep reporting a disabled layer as loading.
+    _fetching = false;
     clearDots();
     _lastViewCenter = null;
     // A stale outage from the last session would misreport a fresh enable —
