@@ -269,6 +269,7 @@ export function buildMiniBox(opts) {
       return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
     },
     getLimits: () => ({ minWidth, maxWidth, minHeight, maxHeight }),
+    edgeInset: EDGE_INSET,
     onResize: ({ left, top, width, height }) => {
       root.style.width = `${width}px`;
       root.style.height = `${height}px`;

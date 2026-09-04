@@ -62,7 +62,16 @@ const INTERACTIVE_SELECTOR = 'button, input, select, textarea, a';
 import { attachResizeHandles } from './panelResize.js';
 
 const STORAGE_PREFIX = 'godsEyeView.panelDragV1.';
-const EDGE_INSET = 6;
+// Shared with miniBox.js's own EDGE_INSET — was 6px here vs 1px there, so an
+// undocked static panel (this file) sat noticeably further from the screen
+// edge than a mini box (Telemetry, Compass, ...) did, and only THIS system's
+// resize handles skipped viewport clamping entirely (see _installResizeHandle
+// below), which is what let a panel get dragged/resized clean off-screen.
+// Per a direct user ask ("all windows can only get to the edge of the
+// screen... some windows still have a buffer pixels at edge and some can go
+// clean through the edge") both bugs are fixed together: one inset, and
+// live-frame clamping during resize (attachResizeHandles's `edgeInset`).
+const EDGE_INSET = 1;
 /** Undocked panels float in [Z_BASE, Z_MAX] — above the base HUD panel band
  * (100-110) but below the voice pill (150), toasts (200), and the clean-view
  * exit control (300). */
@@ -150,6 +159,10 @@ class DraggablePanel {
         minHeight: MIN_UNDOCKED_HEIGHT,
         maxHeight: window.innerHeight,
       }),
+      // Was missing entirely on this system (unlike miniBox.js's mini
+      // boxes) — an undocked panel resized from its n/w handles could be
+      // dragged clean off-screen with nothing ever pulling it back.
+      edgeInset: EDGE_INSET,
       onResize: ({ left, top, width, height }, dir) => {
         if (dir.includes('e') || dir.includes('w')) {
           this.el.style.setProperty(this.resize.varName, `${Math.round(width)}px`);
@@ -166,7 +179,15 @@ class DraggablePanel {
         if (Number.isFinite(width)) {
           try { localStorage.setItem(this._widthStorageKey(), String(Math.round(width))); } catch { /* storage unavailable */ }
         }
-        if (this.undocked) this._save();
+        if (!this.undocked) return;
+        // Safety net to match miniBox.js's onEnd clamp — belt-and-braces
+        // alongside the live edgeInset clamp above, in case the viewport
+        // itself shrank mid-drag.
+        const rect = this.el.getBoundingClientRect();
+        const { left, top } = clampToViewport(rect.left, rect.top, rect);
+        this.el.style.left = `${left}px`;
+        this.el.style.top = `${top}px`;
+        this._save();
       },
     });
   }
@@ -377,6 +398,14 @@ export function initPanelDragging() {
     {
       id: 'global-context-panel', panel: '#global-context-panel', header: '#global-context-panel .panel-header',
       resize: { varName: '--panel-expanded-width', min: 260, max: 520 },
+    },
+    {
+      id: 'control-panel', panel: '#control-panel', header: '#control-panel .panel-header',
+      resize: { varName: '--panel-expanded-width', min: 280, max: 720 },
+    },
+    {
+      id: 'location-bar', panel: '#location-bar', header: '#location-bar .panel-header',
+      resize: { varName: '--panel-expanded-width', min: 280, max: 760 },
     },
   ];
   for (const spec of specs) manager.register(spec.id, spec.panel, spec.header, spec.resize);

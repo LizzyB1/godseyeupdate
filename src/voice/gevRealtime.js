@@ -9,6 +9,7 @@ import {
   resolveVoiceModel,
   serializeCostLimits,
 } from './voiceCost.js';
+import { hidePanel, isPanelHidden, registerPanelLabel } from '../panelVisibility.js';
 
 const TOKEN_URL = '/api/realtime/token';
 const REALTIME_CALLS_URL = 'https://api.openai.com/v1/realtime/calls';
@@ -2558,16 +2559,21 @@ function createVoiceControl({ reset = false } = {}) {
           <button id="gev-voice-tier" class="gev-voice-tier-btn" type="button" aria-pressed="false" title="Voice model tier — applies next session">STD</button>
           <span id="gev-voice-cost-value" class="gev-voice-cost-value" data-level="ok" title="Estimated session cost">~$0.00</span>
         </div>
+        <span class="panel-divider" aria-hidden="true"></span>
+        <button class="panel-collapse-btn" id="gev-voice-collapse-btn" type="button" title="Collapse panel" aria-label="Collapse AI Voice Agent panel" aria-expanded="true">−</button>
+        <button class="panel-close-btn" data-close-target="gev-voice-control" type="button" title="Hide panel" aria-label="Hide AI Voice Agent panel">&times;</button>
       </div>
-      <button id="gev-voice-button" type="button" aria-label="Voice control — hold Space to speak; click to toggle voice" aria-describedby="gev-voice-help">
-        <span class="gev-mic-orbit"><img src="/mic.svg" alt="" /></span>
-        <span class="gev-mic-label">ON/OFF</span>
-      </button>
-      <div class="gev-voice-visualizer" aria-hidden="true">
-        ${Array.from({ length: 15 }, (_, index) => `<span style="--bar:${index}"></span>`).join('')}
-      </div>
-      <div class="gev-voice-readout">
-        <div id="gev-voice-detail">VOICE STANDBY</div>
+      <div class="gev-voice-body">
+        <button id="gev-voice-button" type="button" aria-label="Voice control — hold Space to speak; click to toggle voice" aria-describedby="gev-voice-help">
+          <span class="gev-mic-orbit"><img src="/mic.svg" alt="" /></span>
+          <span class="gev-mic-label">ON/OFF</span>
+        </button>
+        <div class="gev-voice-visualizer" aria-hidden="true">
+          ${Array.from({ length: 15 }, (_, index) => `<span style="--bar:${index}"></span>`).join('')}
+        </div>
+        <div class="gev-voice-readout">
+          <div id="gev-voice-detail">VOICE STANDBY</div>
+        </div>
       </div>
       <div id="gev-voice-help" class="gev-voice-help-tray" role="tooltip">
         <span class="gev-voice-help-kicker">VOICE CONTROL</span>
@@ -2582,18 +2588,48 @@ function createVoiceControl({ reset = false } = {}) {
         <div class="gev-voice-error-hint">Check microphone permission and network access, then try again.</div>
       </div>
     `;
-    const commandDock = document.getElementById('command-dock');
-    if (commandDock) {
-      const locationBar = document.getElementById('location-bar');
-      const controlPanel = document.getElementById('control-panel');
-      commandDock.appendChild(root);
-      if (locationBar) commandDock.insertBefore(locationBar, root);
-      if (controlPanel) commandDock.appendChild(controlPanel);
-    } else {
-      document.body.appendChild(root);
-    }
+    // Visual Presets/Location used to live in a shared #command-dock with
+    // this pill nested between them; that wrapper is retired and all three
+    // are now independent floating boxes (see style.css's own
+    // #gev-voice-control position:fixed rule), so this just appends to body.
+    document.body.appendChild(root);
     root.querySelector('.gev-voice-error-dismiss')?.addEventListener('click', () => {
       root.classList.add('error-dismissed');
+    });
+
+    // Own real mini box now (own header with collapse/hide, same as every
+    // other panel) instead of a chrome-less floating pill — see
+    // src/panelDrag.js (drag+resize registration) and src/panelVisibility.js
+    // (the "×" hide-and-restore-from-Hidden-Panels-tray mechanism every
+    // other box already had). Self-contained rather than routed through
+    // ui.js's `.panel-collapsible` machinery (that system assumes a fixed
+    // set of panels registered up front); mirrors the same hand-rolled
+    // collapse pattern `miniBox.js` uses for every other floating box.
+    registerPanelLabel('gev-voice-control', 'AI Voice Agent');
+    root.classList.toggle('panel-fully-hidden', isPanelHidden('gev-voice-control'));
+    root.querySelector('[data-close-target="gev-voice-control"]')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      hidePanel('gev-voice-control');
+    });
+    const voiceBody = root.querySelector('.gev-voice-body');
+    const voiceCollapseBtn = root.querySelector('#gev-voice-collapse-btn');
+    const VOICE_COLLAPSE_KEY = 'godsEyeView.gevVoiceControl.collapsed';
+    function applyVoiceCollapsed(collapsed) {
+      if (voiceBody) voiceBody.hidden = collapsed;
+      root.classList.toggle('is-collapsed', collapsed);
+      if (voiceCollapseBtn) {
+        voiceCollapseBtn.textContent = collapsed ? '+' : '−';
+        voiceCollapseBtn.setAttribute('aria-expanded', String(!collapsed));
+      }
+    }
+    let storedCollapsed = false;
+    try { storedCollapsed = localStorage.getItem(VOICE_COLLAPSE_KEY) === '1'; } catch { /* storage unavailable */ }
+    applyVoiceCollapsed(storedCollapsed);
+    voiceCollapseBtn?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const collapsed = !root.classList.contains('is-collapsed');
+      applyVoiceCollapsed(collapsed);
+      try { localStorage.setItem(VOICE_COLLAPSE_KEY, collapsed ? '1' : '0'); } catch { /* storage unavailable */ }
     });
   }
   return {

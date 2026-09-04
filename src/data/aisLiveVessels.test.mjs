@@ -1278,7 +1278,9 @@ test('vessel trail lifecycle: reconciliation eviction clears an orphaned trail',
 
 test('buildVesselCard: name title + type/speed/heading detail line', () => {
   const card = buildVesselCard(makeRecord());
-  assert.equal(card.title, 'EVER GIVEN');
+  // MMSI 353136000 -> MID 353 -> Panama, so the title carries its "baby
+  // flag" per a direct user ask to label ships by MMSI flag state.
+  assert.equal(card.title, '🇵🇦 EVER GIVEN');
   assert.deepEqual(card.details, ['CONTAINER SHIP · 14.5KT · 231°']);
   assert.equal(card.accent, '57, 213, 255');
   assert.equal(card.selected, false);
@@ -1297,9 +1299,12 @@ test('buildVesselCard: heading falls back to course; missing parts are omitted',
 
 test('buildVesselCard: unnamed vessels title as MMSI; long names truncate', () => {
   const unnamed = buildVesselCard(makeRecord({ name: 'VESSEL' }));
-  assert.equal(unnamed.title, 'MMSI 353136000');
+  assert.equal(unnamed.title, '🇵🇦 MMSI 353136000');
   const long = buildVesselCard(makeRecord({ name: 'A'.repeat(40) }));
-  assert.ok(long.title.length <= 26, `title too long: ${long.title.length}`);
+  // The flag prefix ("🇵🇦 ") sits ahead of the 26-char-trimmed name, so
+  // strip it before checking the trim itself held to its budget.
+  const withoutFlag = long.title.replace(/^\p{Regional_Indicator}{2} /u, '');
+  assert.ok(withoutFlag.length <= 26, `title too long: ${withoutFlag.length}`);
 });
 
 test('buildVesselCard: anchors to the billboard position when present', () => {
@@ -1334,7 +1339,7 @@ test('buildSelectedVesselCard: full detail card with MMSI + position time', () =
   assert.equal(card.selected, true);
   assert.equal(card.id, 'vessel:353136000');
   assert.equal(card.priority, 100000);
-  assert.equal(card.title, 'EVER GIVEN');
+  assert.equal(card.title, '🇵🇦 EVER GIVEN');
   assert.deepEqual(card.details, [
     'CONTAINER SHIP · 14.5KT · 231°',
     'MMSI 353136000 (Panama) · POS: 11:22:33Z',

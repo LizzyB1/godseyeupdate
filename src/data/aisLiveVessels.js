@@ -52,6 +52,7 @@ import {
 import { requestWorldFocus } from '../worldFocus.js';
 import { holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
 import { getFlagState } from './mmsiMid.js';
+import { flagEmojiForCountryName } from './countryFlags.js';
 
 const FOCUS_EVIDENCE_DEV = import.meta.env?.DEV === true;
 
@@ -2010,7 +2011,7 @@ function registerSelectedContext(record) {
       layerId: 'ais-live-vessels',
       layerName: 'Live AIS Vessels',
       source: 'AISStream',
-      label: displayVesselName(record),
+      label: `${vesselFlagPrefix(record)}${displayVesselName(record)}`,
       latitude: record.lat,
       longitude: record.lon,
       properties: {
@@ -2019,6 +2020,11 @@ function registerSelectedContext(record) {
         speedKt: record.speed,
         course: record.course,
         destination: record.destination,
+        // Both consumed by targetInfoBox.js's Target Info box — flagState
+        // is the country name (mmsiMid.js), flagEmoji the "baby flag" per
+        // a direct user ask to label ships by MMSI flag state.
+        flagState: getFlagState(record.mmsi),
+        flagEmoji: flagEmojiForCountryName(getFlagState(record.mmsi)),
       },
     });
   } catch (error) {
@@ -2113,7 +2119,7 @@ export function buildVesselCard(record) {
     position: record.billboard?.position || record.position,
     gapPx: 10,
     accent: accentForVesselType(record.type),
-    title: trimHudValue(displayVesselName(record), 26),
+    title: `${vesselFlagPrefix(record)}${trimHudValue(displayVesselName(record), 26)}`,
     details,
     selected: false,
     priority: labelPriority(record, null),
@@ -2150,7 +2156,7 @@ export function buildSelectedVesselCard(record) {
     position: record.billboard?.position || record.position,
     gapPx: 12,
     accent: accentForVesselType(record.type),
-    title: trimHudValue(displayVesselName(record), 32),
+    title: `${vesselFlagPrefix(record)}${trimHudValue(displayVesselName(record), 32)}`,
     details,
     selected: true,
     priority: 100000,
@@ -2195,6 +2201,24 @@ function displayVesselName(record) {
   const name = String(record.name || '').trim();
   if (name && name !== 'VESSEL' && name !== record.mmsi) return name;
   return record.mmsi ? `MMSI ${record.mmsi}` : 'VESSEL';
+}
+
+/**
+ * Small "baby flag" emoji for a vessel's MMSI-derived flag state, with a
+ * trailing space so callers can prepend it straight onto a title — e.g.
+ * `${vesselFlagPrefix(record)}${displayVesselName(record)}`. Empty string
+ * (never null) when the MMSI is malformed or its MID is unassigned, so
+ * every call site stays a plain concatenation with no conditional needed.
+ * Per a direct user ask: "put a baby flag of that country next to the
+ * ship's icon, both in the info box and as it is displayed natively" — this
+ * is the "natively displayed" half (the on-map card title every vessel
+ * already renders); `targetInfoBox.js` covers the info-box half.
+ * @param {Object} record - Vessel record (needs `.mmsi`).
+ * @returns {string}
+ */
+function vesselFlagPrefix(record) {
+  const emoji = flagEmojiForCountryName(getFlagState(record?.mmsi));
+  return emoji ? `${emoji} ` : '';
 }
 
 function formatSpeed(speed) {

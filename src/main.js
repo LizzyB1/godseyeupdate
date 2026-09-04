@@ -44,6 +44,8 @@ import { initCacheControllerBox } from './cacheControllerBox.js';
 import { initCompassBox } from './compassBox.js';
 import { initBathymetry } from './data/bathymetry.js';
 import { initBathymetryBox } from './bathymetryBox.js';
+import { initTextStyleBox, restoreTextStyleEarly } from './textStyleBox.js';
+import { initTargetInfoBox } from './targetInfoBox.js';
 import { resolveApiKey } from './apiKeys.js';
 import { initSettingsDialog, OPACITY_STORAGE_KEY } from './settingsDialog.js';
 import { fetchSessionSettings, createSessionSettingsAutosave } from './sessionSettingsClient.js';
@@ -54,6 +56,10 @@ initLogoGaze();
 // one recovery path for that case — a person can open Settings and add a
 // key without editing .env on disk. See src/settingsDialog.js.
 window.__godsEyeView = { ...(window.__godsEyeView || {}), settingsDialog: initSettingsDialog() };
+// Same early-apply timing as the transparency slider just above — restores
+// a saved text scale/color before any panel renders, so there's no flash
+// of default size/color on load. See src/textStyleBox.js.
+restoreTextStyleEarly();
 
 // Kick off the transportable-session-settings fetch as early as possible
 // (see src/data/sessionSettings.js, src/sessionSettingsClient.js) so it
@@ -389,6 +395,13 @@ async function init() {
     // formats, etc. — see src/aboutBox.js.
     const aboutBox = initAboutBox();
 
+    // Global text size/color controls for every box — see src/textStyleBox.js.
+    const textStyleBox = initTextStyleBox();
+
+    // Click-to-inspect full detail box for the selected ship/aircraft — see
+    // src/targetInfoBox.js.
+    const targetInfoBox = initTargetInfoBox();
+
     // Raw render/feed/compute counters, one internal panel each — reuses
     // DataLayerManager's existing per-layer stats/lifecycle plus the
     // bathymetry/contour engines' existing status callbacks, so it needs
@@ -410,12 +423,13 @@ async function init() {
     // north at the current location.
     const compassBox = initCompassBox(viewer);
 
-    // GUI overhaul: lets the DISPLAY, DATA LAYERS, CCTV, SCENES, and CONTEXT
-    // panels be dragged free of their managed stacks — see src/panelDrag.js
-    // for why the command-dock hover trays (Visual Presets/Location) are
-    // intentionally left out of free-dragging specifically (their native
-    // <button> headers have their own hover/pin choreography); they still
-    // get full-hide (src/panelVisibility.js) and collapse like every panel.
+    // GUI overhaul: lets the DISPLAY, DATA LAYERS, CCTV, SCENES, CONTEXT,
+    // Visual Presets, and Location panels all be dragged free of their
+    // managed stacks by grabbing anywhere on their header — see
+    // src/panelDrag.js. Visual Presets/Location used to be nested in a
+    // retired #command-dock with hover-triggered popovers, which is why
+    // they were excluded here; now they're standalone floating boxes like
+    // every other panel and share the same drag/resize/hide machinery.
     const panelDrag = initPanelDragging();
 
     // The follow camera recomputes the tracked target's dead-reckon position
@@ -512,6 +526,8 @@ async function init() {
       bathymetryBox,
       panelRestoreTray,
       aboutBox,
+      textStyleBox,
+      targetInfoBox,
       telemetryBox,
       cacheControllerBox,
       compassBox,
@@ -520,6 +536,16 @@ async function init() {
       requestRender: governorRequestRender,
     };
     window.__godsEyeView.voiceCommands = initGevVoiceCommands({ viewer, styleManager, dataManager, sceneDirector, annotations });
+    // Registered here (not in panelDrag.js's own static specs list above)
+    // because #gev-voice-control doesn't exist in the DOM until
+    // initGevVoiceCommands() just built it — every other draggable panel is
+    // static markup in index.html, present before initPanelDragging() runs.
+    panelDrag.register(
+      'gev-voice-control',
+      '#gev-voice-control',
+      '#gev-voice-control .gev-voice-heading',
+      { varName: '--panel-expanded-width', min: 260, max: 440 },
+    );
 
   } catch (error) {
     console.error("God's Eye View initialization failed:", error);
