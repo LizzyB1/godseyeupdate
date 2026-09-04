@@ -1,13 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MapOverlaysEngine, tooWideStatusText } from './mapOverlays.js';
+import { MapOverlaysEngine, STALE_STATUS_TEXT, tooWideStatusText } from './mapOverlays.js';
 
 /**
  * The engine's constructor wires Cesium primitives, data sources and camera
  * listeners, none of which the view-span/status bookkeeping touches — so
  * these exercise the methods directly against the minimal state they read.
  */
-function stubEngine({ contoursEnabled = true, maxSpanDeg = 2.5, status = '' } = {}) {
+function stubEngine({
+  contoursEnabled = true, maxSpanDeg = 2.5, status = '', spanDeg = 0.7,
+} = {}) {
   const published = [];
   const statuses = [];
   return {
@@ -18,10 +20,18 @@ function stubEngine({ contoursEnabled = true, maxSpanDeg = 2.5, status = '' } = 
     onViewSpanChange: (spanDeg, limitDeg) => published.push([spanDeg, limitDeg]),
     _setStatus: MapOverlaysEngine.prototype._setStatus,
     onStatusChange: (text, phase) => statuses.push([text, phase]),
+    _markContoursStale: MapOverlaysEngine.prototype._markContoursStale,
+    _publishViewSpan: MapOverlaysEngine.prototype._publishViewSpan,
+    _syncSpanGateStatus: MapOverlaysEngine.prototype._syncSpanGateStatus,
+    _currentViewSpanDeg: () => spanDeg,
+    _recomputeGrid() {},
+    _recomputeChartDatum() {},
     published,
     statuses,
   };
 }
+
+const moveEnd = (engine) => MapOverlaysEngine.prototype._onCameraMoveEnd.call(engine);
 
 const publish = (engine, spanDeg) => MapOverlaysEngine.prototype._publishViewSpan.call(engine, spanDeg);
 const syncGate = (engine, spanDeg) => MapOverlaysEngine.prototype._syncSpanGateStatus.call(engine, spanDeg);
@@ -55,7 +65,7 @@ test('zooming back inside the limit clears the stale too-wide status', () => {
   // wider view the readout had already moved on from.
   const engine = stubEngine({ status: tooWideStatusText(3.4, 2.5) });
   syncGate(engine, 0.7);
-  assert.deepEqual(engine.statuses, [['Sampling scene heights…', 'computing']]);
+  assert.deepEqual(engine.statuses, [[STALE_STATUS_TEXT, 'offline']]);
   assert.ok(!engine._contourStatus.startsWith('Zoom in'));
 });
 
@@ -69,6 +79,27 @@ test('a legal span leaves a status that was never about the span alone', () => {
   const engine = stubEngine({ status: '3 levels, 812 segments (10–240 m relief).' });
   syncGate(engine, 0.7);
   assert.deepEqual(engine.statuses, []);
+});
+
+test('a camera move never recomputes, it asks for a refresh', () => {
+  const engine = stubEngine({ status: '3 levels, 812 segments (10–240 m relief).', spanDeg: 0.7 });
+  moveEnd(engine);
+  assert.deepEqual(engine.published, [[0.7, 2.5]]);
+  assert.deepEqual(engine.statuses, [[STALE_STATUS_TEXT, 'offline']]);
+  assert.equal(engine._contoursStale, true);
+});
+
+test('a camera move past the limit says so rather than offering a refresh that cannot run', () => {
+  const engine = stubEngine({ spanDeg: 3.4 });
+  moveEnd(engine);
+  assert.deepEqual(engine.statuses, [[tooWideStatusText(3.4, 2.5), 'offline']]);
+});
+
+test('a camera move with contours off says nothing — there is nothing drawn to go stale', () => {
+  const engine = stubEngine({ contoursEnabled: false, spanDeg: 0.7 });
+  moveEnd(engine);
+  assert.deepEqual(engine.statuses, []);
+  assert.notEqual(engine._contoursStale, true);
 });
 
 test('the span gate says nothing while contours are switched off', () => {
