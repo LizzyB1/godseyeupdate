@@ -112,6 +112,14 @@ const GEOCODE_CACHE_STORE = 'geocode';
 const CONTOUR_GEOMETRY_CACHE_STORE = 'mapContourLines';
 /** Within this long a cached contour result is treated as authoritative and the live resample is skipped entirely; past it, a hit is still painted instantly but a live recompute still follows and overwrites it. */
 const CONTOUR_CACHE_FRESH_MS = 10 * 60 * 1000;
+/**
+ * How long the contour pipeline waits on the durable cache read before
+ * going ahead with the live compute anyway. The cache is an optimization,
+ * never a dependency: a read that never settles used to hang the whole
+ * recompute (and, since every later recompute hit the same wall, contours
+ * stopped updating entirely until the page was reloaded).
+ */
+const CACHE_READ_TIMEOUT_MS = 1500;
 /** View-rectangle rounding (decimal degrees) for the contour cache key — coarse enough that returning to roughly the same framing still hits (~111m), fine enough that two genuinely different views don't collide. */
 const CONTOUR_CACHE_PRECISION = 3;
 /** The only vertical-exaggeration multipliers the UI (and this engine) accept — see `setVerticalExaggeration`. */
@@ -210,6 +218,23 @@ export const DEFAULT_STATE = Object.freeze({
   // `_recomputeChartDatum`.
   chartDatumEnabled: true,
 });
+
+/**
+ * Resolves to `promise`'s value, or to `undefined` if it rejects or hasn't
+ * settled within `ms` — for awaits that must never be able to stall their
+ * caller (see `CACHE_READ_TIMEOUT_MS`).
+ */
+function withTimeout(promise, ms) {
+  return Promise.race([
+    Promise.resolve(promise).catch(() => undefined),
+    new Promise((resolve) => { setTimeout(() => resolve(undefined), ms); }),
+  ]);
+}
+
+/** The status sentence shown when the view is too wide to contour — the one place that wording and its numbers are produced. */
+export function tooWideStatusText(spanDeg, maxSpanDeg) {
+  return `Zoom in to compute contours (view is ${spanDeg.toFixed(1)}° wide, need < ${maxSpanDeg.toFixed(1)}°).`;
+}
 
 function loadState() {
   try {
@@ -390,6 +415,10 @@ export class MapOverlaysEngine {
     );
     this.state.contourMaxViewSpanDeg = clamped;
     this._persist();
+    // The readout carries the limit as well as the span, so it has to be
+    // republished here — the recompute below is debounced, and doesn't run
+    // at all with contours off.
+    this._publishViewSpan(this._lastViewSpanDeg ?? this._currentViewSpanDeg());
     if (this.state.contoursEnabled) this._scheduleRecompute();
   }
 
@@ -744,21 +773,40 @@ export class MapOverlaysEngine {
    *   "Refresh contours" button (`refreshContours`) — the whole point of
    *   asking for a refresh is to not trust whatever's cached.
    */
-  async _recomputeContours({ forceLive = false } = {}) {
+  async _recomputeContours(opts = {}) {
+    try {
+      await this._runRecompute(opts);
+    } catch (err) {
+      // Nothing awaits this method (it's driven from timers and camera
+      // events), so an exception here would otherwise be an unhandled
+      // rejection: the status light frozen mid-cycle on whatever the last
+      // phase was, and no indication that contours have stopped.
+      this._setStatus('Contour recompute failed — try Refresh contours.', 'offline');
+      console.warn('[MapOverlays] contour recompute failed:', err);
+    }
+  }
+
+  async _runRecompute({ forceLive = false } = {}) {
     if (!this.state.contoursEnabled) return;
     const token = ++this._computeToken;
     const rect = this.viewer.camera.computeViewRectangle();
     if (!rect) { this._setStatus('Camera view unavailable.', 'offline'); return; }
 
     const spanDeg = Cesium.Math.toDegrees(Math.max(rect.width, rect.height));
-    this._lastViewSpanDeg = spanDeg;
-    this.onViewSpanChange?.(spanDeg, this.state.contourMaxViewSpanDeg);
+    this._publishViewSpan(spanDeg);
     const maxSpanDeg = this.state.contourMaxViewSpanDeg;
     if (spanDeg > maxSpanDeg) {
       this._clearContours();
-      this._setStatus(`Zoom in to compute contours (view is ${spanDeg.toFixed(1)}° wide, need < ${maxSpanDeg.toFixed(1)}°).`, 'offline');
+      this._setStatus(tooWideStatusText(spanDeg, maxSpanDeg), 'offline');
       return;
     }
+    // Claim the status line for THIS view before the first await below.
+    // Every early return past this point (superseded token, an empty or
+    // failed sample) otherwise leaves whatever the previous cycle wrote —
+    // most visibly the "zoom in, view is N° wide" sentence from a wider
+    // view, still on screen next to a span readout that has already
+    // updated to the new, narrower span.
+    this._setStatus('Sampling scene heights…', 'computing');
 
     const west = Cesium.Math.toDegrees(rect.west);
     const south = Cesium.Math.toDegrees(rect.south);
@@ -777,7 +825,10 @@ export class MapOverlaysEngine {
     // there's no blank flash, but always keeps going into a real resample
     // regardless of how fresh the cache entry is.
     const cacheKey = contourCacheKey(west, south, east, north, this.state);
-    const cached = await this._cache.get(CONTOUR_GEOMETRY_CACHE_STORE, cacheKey);
+    const cached = await withTimeout(
+      this._cache.get(CONTOUR_GEOMETRY_CACHE_STORE, cacheKey),
+      CACHE_READ_TIMEOUT_MS,
+    );
     if (token !== this._computeToken) return; // superseded while the cache read was in flight
     if (cached) {
       this._renderCachedContours(cached, token); // sets phase 'done' via _finishContourRender
@@ -800,7 +851,6 @@ export class MapOverlaysEngine {
       }
     }
 
-    this._setStatus('Sampling scene heights…', 'computing');
     // Yield one frame here before the actual (synchronous, sometimes tens
     // of ms) sampling/marching-squares/stitching work below runs. Without
     // this, the 'computing' status set above and the 'done' status set at
@@ -1168,7 +1218,47 @@ export class MapOverlaysEngine {
     }
   }
 
+  /**
+   * Records the current view span and pushes it at the UI readout. Kept
+   * separate from `_recomputeContours` so the readout can also be updated
+   * straight off a camera move — the recompute is debounced by
+   * RECOMPUTE_DEBOUNCE_MS and skipped entirely while contours are off, and
+   * a readout that only moved on that schedule sat visibly behind the
+   * viewport it claims to describe.
+   */
+  _publishViewSpan(spanDeg) {
+    if (!Number.isFinite(spanDeg)) return;
+    this._lastViewSpanDeg = spanDeg;
+    this.onViewSpanChange?.(spanDeg, this.state.contourMaxViewSpanDeg);
+  }
+
+  /**
+   * Brings the status line into line with a just-observed view span,
+   * without waiting out the recompute debounce: past the limit, say so
+   * now; back inside it, drop the "zoom in" sentence rather than leave it
+   * contradicting a span readout that already shows a legal span.
+   */
+  _syncSpanGateStatus(spanDeg) {
+    if (!this.state.contoursEnabled || !Number.isFinite(spanDeg)) return;
+    const maxSpanDeg = this.state.contourMaxViewSpanDeg;
+    if (spanDeg > maxSpanDeg) {
+      this._setStatus(tooWideStatusText(spanDeg, maxSpanDeg), 'offline');
+    } else if (this._contourStatus.startsWith('Zoom in to compute contours')) {
+      this._setStatus('Sampling scene heights…', 'computing');
+    }
+  }
+
+  /** Current camera view span in degrees (the wider of the view rectangle's two sides), or null if the camera isn't looking at the globe. */
+  _currentViewSpanDeg() {
+    const rect = this.viewer.camera?.computeViewRectangle?.();
+    if (!rect) return null;
+    return Cesium.Math.toDegrees(Math.max(rect.width, rect.height));
+  }
+
   _onCameraMoveEnd() {
+    const spanDeg = this._currentViewSpanDeg();
+    this._publishViewSpan(spanDeg);
+    this._syncSpanGateStatus(spanDeg);
     if (this.state.contoursEnabled) this._scheduleRecompute();
     if (this.state.gridEnabled) this._recomputeGrid();
     if (this.state.chartDatumEnabled) this._recomputeChartDatum();

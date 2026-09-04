@@ -122,10 +122,27 @@ function txDone(tx) {
   });
 }
 
+/**
+ * How long an `indexedDB.open` may sit without firing any of its events
+ * before it is treated as a failure. An open can genuinely never settle —
+ * a second tab holding the database at an older version blocks the upgrade
+ * (`onblocked`, and even that only fires for a version change), and a
+ * browser under storage pressure can leave the request pending — and every
+ * `get`/`put` awaits this promise, so a hang here silently freezes each
+ * caller's pipeline rather than degrading to the no-op cache the rest of
+ * this file is careful to fall back to.
+ */
+const OPEN_TIMEOUT_MS = 4000;
+
 function openDb() {
   return new Promise((resolve, reject) => {
     if (!hasIndexedDb()) { reject(new Error('IndexedDB unavailable')); return; }
     const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const timer = setTimeout(
+      () => reject(new Error('apiCache IndexedDB open timed out')),
+      OPEN_TIMEOUT_MS,
+    );
+    const settle = (fn, value) => { clearTimeout(timer); fn(value); };
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(ENTRIES_STORE)) {
@@ -136,8 +153,9 @@ function openDb() {
         db.createObjectStore(META_STORE, { keyPath: 'id' });
       }
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error || new Error('Could not open apiCache IndexedDB'));
+    req.onsuccess = () => settle(resolve, req.result);
+    req.onerror = () => settle(reject, req.error || new Error('Could not open apiCache IndexedDB'));
+    req.onblocked = () => settle(reject, new Error('apiCache IndexedDB upgrade blocked by another tab'));
   });
 }
 
@@ -149,7 +167,14 @@ export class ApiCache {
   }
 
   _db() {
-    if (!this._dbPromise) this._dbPromise = openDb();
+    if (!this._dbPromise) {
+      // Drop a rejected open rather than memoizing it: the conditions that
+      // fail one (another tab mid-upgrade, transient storage pressure) pass
+      // later, and a memoized rejection would make the cache permanently
+      // dead for the rest of the session.
+      this._dbPromise = openDb();
+      this._dbPromise.catch(() => { this._dbPromise = null; });
+    }
     return this._dbPromise;
   }
 
