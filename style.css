@@ -2950,6 +2950,14 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.cockpit-route-airport small {
+  overflow: hidden;
+  color: color-mix(in srgb, var(--cockpit-accent) 62%, white);
+  font-size: 6px;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cockpit-route-arrow {
   color: var(--cockpit-accent);
   font-size: 15px;

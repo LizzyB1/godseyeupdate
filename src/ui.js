@@ -624,7 +624,9 @@ class CockpitViewController {
     this.aircraftMeta = document.getElementById('cockpit-aircraft-meta');
     this.route = document.getElementById('cockpit-route');
     this.routeFrom = document.getElementById('cockpit-route-from');
+    this.routeFromCountry = document.getElementById('cockpit-route-from-country');
     this.routeTo = document.getElementById('cockpit-route-to');
+    this.routeToCountry = document.getElementById('cockpit-route-to-country');
     this.routeStatus = document.getElementById('cockpit-route-status');
     this.routeDirection = document.getElementById('cockpit-route-direction');
     this.routeDirectionLabel = document.getElementById('cockpit-route-direction-label');
@@ -1408,8 +1410,13 @@ class CockpitViewController {
     const destination = info?.route?.destination;
     const validDestination = Number.isFinite(destination?.lat) && Number.isFinite(destination?.lon);
     const routeLabel = (airport) => [airport?.code, airport?.name].filter(Boolean).join(' · ') || 'UNKNOWN';
+    // City and country come from the OurAirports directory, which resolves a
+    // moment after the codes do — an empty line until then, never a placeholder.
+    const routeCountry = (airport) => [airport?.city, airport?.country].filter(Boolean).join(', ');
     if (this.routeFrom) this.routeFrom.textContent = routeLabel(origin);
     if (this.routeTo) this.routeTo.textContent = routeLabel(destination);
+    if (this.routeFromCountry) this.routeFromCountry.textContent = routeCountry(origin);
+    if (this.routeToCountry) this.routeToCountry.textContent = routeCountry(destination);
     if (this.routeStatus) {
       this.routeStatus.textContent = validDestination
         ? 'ARROW · ESTIMATED DIRECTION'
