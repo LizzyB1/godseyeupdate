@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_STATE, MapOverlaysEngine, STALE_STATUS_TEXT, tooWideStatusText } from './mapOverlays.js';
+import { MapOverlaysEngine, STALE_STATUS_TEXT, tooWideStatusText } from './mapOverlays.js';
 
 /**
  * The engine's constructor wires Cesium primitives, data sources and camera
@@ -8,17 +8,12 @@ import { DEFAULT_STATE, MapOverlaysEngine, STALE_STATUS_TEXT, tooWideStatusText 
  * these exercise the methods directly against the minimal state they read.
  */
 function stubEngine({
-  contoursEnabled = true, maxSpanDeg = 2.5, status = '', autoRecompute = false, spanDeg = 0.7,
+  contoursEnabled = true, maxSpanDeg = 2.5, status = '', spanDeg = 0.7,
 } = {}) {
   const published = [];
   const statuses = [];
-  const scheduled = [];
   return {
-    state: {
-      contoursEnabled,
-      contourMaxViewSpanDeg: maxSpanDeg,
-      contourAutoRecompute: autoRecompute,
-    },
+    state: { contoursEnabled, contourMaxViewSpanDeg: maxSpanDeg },
     _contourStatus: status,
     _contourPhase: 'offline',
     _lastViewSpanDeg: null,
@@ -29,12 +24,10 @@ function stubEngine({
     _publishViewSpan: MapOverlaysEngine.prototype._publishViewSpan,
     _syncSpanGateStatus: MapOverlaysEngine.prototype._syncSpanGateStatus,
     _currentViewSpanDeg: () => spanDeg,
-    _scheduleRecompute: () => scheduled.push(true),
     _recomputeGrid() {},
     _recomputeChartDatum() {},
     published,
     statuses,
-    scheduled,
   };
 }
 
@@ -66,19 +59,13 @@ test('an unavailable span leaves the last known one alone rather than blanking i
   assert.equal(engine.published.length, 1);
 });
 
-test('zooming back inside the limit, without auto-recompute, points at the refresh button', () => {
-  const engine = stubEngine({ status: tooWideStatusText(3.4, 2.5) });
-  syncGate(engine, 0.7);
-  assert.deepEqual(engine.statuses, [[STALE_STATUS_TEXT, 'offline']]);
-});
-
 test('zooming back inside the limit clears the stale too-wide status', () => {
   // The reported bug: "View span: 0.7° (limit 2.5°)" next to "Zoom in to
   // compute contours (view is 3.4° wide…)" — the status left over from the
   // wider view the readout had already moved on from.
-  const engine = stubEngine({ status: tooWideStatusText(3.4, 2.5), autoRecompute: true });
+  const engine = stubEngine({ status: tooWideStatusText(3.4, 2.5) });
   syncGate(engine, 0.7);
-  assert.deepEqual(engine.statuses, [['Sampling scene heights…', 'computing']]);
+  assert.deepEqual(engine.statuses, [[STALE_STATUS_TEXT, 'offline']]);
   assert.ok(!engine._contourStatus.startsWith('Zoom in'));
 });
 
@@ -94,14 +81,9 @@ test('a legal span leaves a status that was never about the span alone', () => {
   assert.deepEqual(engine.statuses, []);
 });
 
-test('recompute-on-camera-move is off out of the box', () => {
-  assert.equal(DEFAULT_STATE.contourAutoRecompute, false);
-});
-
-test('a camera move does not recompute on its own, it asks for a refresh', () => {
+test('a camera move never recomputes, it asks for a refresh', () => {
   const engine = stubEngine({ status: '3 levels, 812 segments (10–240 m relief).', spanDeg: 0.7 });
   moveEnd(engine);
-  assert.deepEqual(engine.scheduled, []);
   assert.deepEqual(engine.published, [[0.7, 2.5]]);
   assert.deepEqual(engine.statuses, [[STALE_STATUS_TEXT, 'offline']]);
   assert.equal(engine._contoursStale, true);
@@ -113,10 +95,10 @@ test('a camera move past the limit says so rather than offering a refresh that c
   assert.deepEqual(engine.statuses, [[tooWideStatusText(3.4, 2.5), 'offline']]);
 });
 
-test('with auto-recompute on, a camera move schedules one and claims no staleness', () => {
-  const engine = stubEngine({ autoRecompute: true, spanDeg: 0.7 });
+test('a camera move with contours off says nothing — there is nothing drawn to go stale', () => {
+  const engine = stubEngine({ contoursEnabled: false, spanDeg: 0.7 });
   moveEnd(engine);
-  assert.deepEqual(engine.scheduled, [true]);
+  assert.deepEqual(engine.statuses, []);
   assert.notEqual(engine._contoursStale, true);
 });
 

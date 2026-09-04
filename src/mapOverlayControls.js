@@ -128,17 +128,6 @@ export class MapOverlayControls {
     contourRow.appendChild(document.createTextNode('Show contour lines'));
     contourSection.appendChild(contourRow);
 
-    // Off by default: recomputing on every camera settle is what makes the
-    // app crawl while zooming (see the engine's `contourAutoRecompute`).
-    const autoRow = el('label', 'mapovl-row');
-    const autoEnable = document.createElement('input');
-    autoEnable.type = 'checkbox';
-    autoEnable.checked = this.engine.state.contourAutoRecompute;
-    autoRow.title = 'Recompute contours automatically whenever the camera stops moving';
-    autoRow.appendChild(autoEnable);
-    autoRow.appendChild(document.createTextNode('Recompute on camera move'));
-    contourSection.appendChild(autoRow);
-
     const intervalRow = el('label', 'mapovl-row');
     intervalRow.appendChild(document.createTextNode('Interval'));
     const intervalSelect = document.createElement('select');
@@ -280,7 +269,6 @@ export class MapOverlayControls {
     body.appendChild(contourSection);
 
     contourEnable.addEventListener('change', () => this.engine.setContoursEnabled(contourEnable.checked));
-    autoEnable.addEventListener('change', () => this.engine.setContourAutoRecompute(autoEnable.checked));
     intervalSelect.addEventListener('change', () => this.engine.setContourMajorSpacing(Number(intervalSelect.value)));
     minorEnable.addEventListener('change', () => this.engine.setContourMinorEnabled(minorEnable.checked));
 

@@ -38,7 +38,6 @@ import { LAND_CONTOUR_PALETTE, paletteColorHex } from './contourColors.js';
  */
 
 const STORAGE_KEY = 'godsEyeView.mapOverlays.state';
-const RECOMPUTE_DEBOUNCE_MS = 550;
 // Sampling the live scene is a synchronous per-point ray-pick rather than a
 // batched DEM-tile fetch, so the grid is kept smaller than the old
 // terrain-provider version to stay cheap on every recompute.
@@ -150,13 +149,6 @@ function contourCacheKey(west, south, east, north, state) {
 
 export const DEFAULT_STATE = Object.freeze({
   contoursEnabled: false,
-  // Whether a camera move recomputes contours by itself. Off by default:
-  // a contour pass samples the scene across the whole viewport, so
-  // recomputing on every settle during a zoom or a pan queues up work far
-  // faster than it retires and the app crawls. Off, camera moves only
-  // mark the drawn lines stale (see `_onCameraMoveEnd`) and the "Refresh
-  // contours" button computes the current view once, on demand.
-  contourAutoRecompute: false,
   contourMajorSpacing: 50,
   contourMinorEnabled: false,
   contourMinorSpacing: 10,
@@ -333,7 +325,7 @@ export class MapOverlaysEngine {
     // value restored from an older session's saved state — before the UI was
     // limited to 1.0×/1.5×/2.0× — gets snapped to the nearest valid option.
     this.setVerticalExaggeration(this.state.verticalExaggeration);
-    if (this.state.contoursEnabled) this._scheduleRecompute();
+    if (this.state.contoursEnabled) this._markContoursStale(this._currentViewSpanDeg());
     if (this.state.gridEnabled) this._recomputeGrid();
     if (this.state.chartDatumEnabled) this._recomputeChartDatum();
   }
@@ -397,29 +389,15 @@ export class MapOverlaysEngine {
   setContoursEnabled(enabled) {
     this.state.contoursEnabled = Boolean(enabled);
     this._persist();
-    if (this.state.contoursEnabled) this._scheduleRecompute();
+    if (this.state.contoursEnabled) this._markContoursStale(this._currentViewSpanDeg());
     else this._clearContours();
-  }
-
-  /**
-   * Turns automatic recompute-on-camera-move on or off — see
-   * `DEFAULT_STATE.contourAutoRecompute`. Switching it on recomputes right
-   * away, so it picks up a view that moved while it was off rather than
-   * waiting for the next camera settle.
-   */
-  setContourAutoRecompute(enabled) {
-    this.state.contourAutoRecompute = Boolean(enabled);
-    this._persist();
-    if (this.state.contourAutoRecompute && this.state.contoursEnabled) {
-      this._scheduleRecompute();
-    }
   }
 
   setContourMajorSpacing(meters) {
     const clamped = Cesium.Math.clamp(Number(meters) || 50, 5, 1000);
     this.state.contourMajorSpacing = clamped;
     this._persist();
-    if (this.state.contoursEnabled) this._scheduleRecompute();
+    this._markContoursStale(this._lastViewSpanDeg);
   }
 
   /**
@@ -444,20 +422,20 @@ export class MapOverlaysEngine {
     // republished here — the recompute below is debounced, and doesn't run
     // at all with contours off.
     this._publishViewSpan(this._lastViewSpanDeg ?? this._currentViewSpanDeg());
-    if (this.state.contoursEnabled) this._scheduleRecompute();
+    this._markContoursStale(this._lastViewSpanDeg);
   }
 
   setContourMinorEnabled(enabled) {
     this.state.contourMinorEnabled = Boolean(enabled);
     this._persist();
-    if (this.state.contoursEnabled) this._scheduleRecompute();
+    this._markContoursStale(this._lastViewSpanDeg);
   }
 
   setContourMinorSpacing(meters) {
     const clamped = Cesium.Math.clamp(Number(meters) || 10, 1, 500);
     this.state.contourMinorSpacing = clamped;
     this._persist();
-    if (this.state.contoursEnabled && this.state.contourMinorEnabled) this._scheduleRecompute();
+    this._markContoursStale(this._lastViewSpanDeg);
   }
 
   /**
@@ -470,7 +448,7 @@ export class MapOverlaysEngine {
   setContourSmoothing(level) {
     this.state.contourSmoothing = Cesium.Math.clamp(Math.round(Number(level)) || 0, 0, 4);
     this._persist();
-    if (this.state.contoursEnabled) this._scheduleRecompute();
+    this._markContoursStale(this._lastViewSpanDeg);
   }
 
   /**
@@ -492,7 +470,7 @@ export class MapOverlaysEngine {
     }
     this.state.contourMinHeightM = snapped;
     this._persist();
-    if (this.state.contoursEnabled) this._scheduleRecompute();
+    this._markContoursStale(this._lastViewSpanDeg);
   }
 
   // ── chart datum (sea level) plane ───────────────────────────────────
@@ -578,8 +556,8 @@ export class MapOverlaysEngine {
   setContourFlagsEnabled(enabled) {
     this.state.contourFlagsEnabled = Boolean(enabled);
     this._persist();
-    if (this.state.contourFlagsEnabled && this.state.contoursEnabled) this._scheduleRecompute();
-    else if (!this.state.contourFlagsEnabled) this._clearContourFlags();
+    if (this.state.contourFlagsEnabled) this._markContoursStale(this._lastViewSpanDeg);
+    else this._clearContourFlags();
   }
 
   _clearContourFlags() {
@@ -614,7 +592,7 @@ export class MapOverlaysEngine {
     const next = Array.isArray(edges) ? edges.filter((e) => FLAG_EDGES.includes(e)) : [];
     this.state.flagEdges = next.length ? next : ['west'];
     this._persist();
-    if (this.state.contourFlagsEnabled && this.state.contoursEnabled) this._scheduleRecompute();
+    if (this.state.contourFlagsEnabled) this._markContoursStale(this._lastViewSpanDeg);
   }
 
   setFlagLabelStep(step) {
@@ -694,12 +672,6 @@ export class MapOverlaysEngine {
     // pass, so this default is only ever the last word when contours were
     // genuinely just turned off.
     this._setStatus('', 'offline');
-  }
-
-  _scheduleRecompute() {
-    if (this._recomputeTimer) clearTimeout(this._recomputeTimer);
-    this._retryCountThisCycle = 0;
-    this._recomputeTimer = setTimeout(() => this._recomputeContours(), RECOMPUTE_DEBOUNCE_MS);
   }
 
   /**
@@ -1246,11 +1218,10 @@ export class MapOverlaysEngine {
 
   /**
    * Records the current view span and pushes it at the UI readout. Kept
-   * separate from `_recomputeContours` so the readout can also be updated
-   * straight off a camera move — the recompute is debounced by
-   * RECOMPUTE_DEBOUNCE_MS and skipped entirely while contours are off, and
-   * a readout that only moved on that schedule sat visibly behind the
-   * viewport it claims to describe.
+   * separate from `_recomputeContours` so the readout tracks the camera
+   * itself rather than the last recompute — recomputes only happen when
+   * the Refresh button is pressed, so a readout tied to them would sit
+   * arbitrarily far behind the viewport it claims to describe.
    */
   _publishViewSpan(spanDeg) {
     if (!Number.isFinite(spanDeg)) return;
@@ -1259,10 +1230,10 @@ export class MapOverlaysEngine {
   }
 
   /**
-   * Brings the status line into line with a just-observed view span,
-   * without waiting out the recompute debounce: past the limit, say so
-   * now; back inside it, drop the "zoom in" sentence rather than leave it
-   * contradicting a span readout that already shows a legal span.
+   * Brings the status line into line with a just-observed view span:
+   * past the limit, say so now; back inside it, drop the "zoom in"
+   * sentence rather than leave it contradicting a span readout that
+   * already shows a legal span.
    */
   _syncSpanGateStatus(spanDeg) {
     if (!this.state.contoursEnabled || !Number.isFinite(spanDeg)) return;
@@ -1270,21 +1241,21 @@ export class MapOverlaysEngine {
     if (spanDeg > maxSpanDeg) {
       this._setStatus(tooWideStatusText(spanDeg, maxSpanDeg), 'offline');
     } else if (this._contourStatus.startsWith('Zoom in to compute contours')) {
-      this._setStatus(
-        this.state.contourAutoRecompute
-          ? 'Sampling scene heights…'
-          : STALE_STATUS_TEXT,
-        this.state.contourAutoRecompute ? 'computing' : 'offline',
-      );
+      this._setStatus(STALE_STATUS_TEXT, 'offline');
     }
   }
 
   /**
-   * With auto-recompute off, a camera move leaves whatever is drawn
-   * describing the view it was computed for. Say so, rather than let a
-   * "3 levels, 812 segments" line from two viewports ago read as current.
+   * Nothing recomputes contours on its own, so anything that invalidates
+   * what's drawn — a camera move, a settings change — leaves it describing
+   * a view or a setting that's no longer current. Say so, rather than let
+   * a "3 levels, 812 segments" line from two viewports ago read as
+   * current. A no-op while contours are off (nothing is drawn to go
+   * stale) or while the view is too wide to compute at all (that sentence
+   * is the more useful one).
    */
   _markContoursStale(spanDeg) {
+    if (!this.state.contoursEnabled) return;
     this._contoursStale = true;
     if (Number.isFinite(spanDeg) && spanDeg > this.state.contourMaxViewSpanDeg) return;
     this._setStatus(STALE_STATUS_TEXT, 'offline');
@@ -1301,10 +1272,7 @@ export class MapOverlaysEngine {
     const spanDeg = this._currentViewSpanDeg();
     this._publishViewSpan(spanDeg);
     this._syncSpanGateStatus(spanDeg);
-    if (this.state.contoursEnabled) {
-      if (this.state.contourAutoRecompute) this._scheduleRecompute();
-      else this._markContoursStale(spanDeg);
-    }
+    this._markContoursStale(spanDeg);
     if (this.state.gridEnabled) this._recomputeGrid();
     if (this.state.chartDatumEnabled) this._recomputeChartDatum();
   }
