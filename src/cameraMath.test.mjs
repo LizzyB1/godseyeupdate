@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
-import { computeHorizontalForward, signedRollFromLevel } from './cameraMath.js';
+import { compassTapeMarks, computeHorizontalForward, signedRollFromLevel } from './cameraMath.js';
 
 const ellipsoid = Cesium.Ellipsoid.WGS84;
 const position = Cesium.Cartesian3.fromDegrees(0, 0, 1000); // equator, 1km up
@@ -88,4 +88,41 @@ test('signedRollFromLevel reports a small signed deviation near either wraparoun
 
 test('signedRollFromLevel reports a large deviation for a camera rolled onto its side', () => {
   assert.ok(Math.abs(signedRollFromLevel(Cesium.Math.PI_OVER_TWO)) > Cesium.Math.toRadians(80));
+});
+
+test('compass tape centers the current heading and spans the requested arc', () => {
+  const marks = compassTapeMarks(90, { halfSpanDeg: 60, stepDeg: 15 });
+  assert.deepEqual(marks.map((mark) => mark.deg), [30, 45, 60, 75, 90, 105, 120, 135, 150]);
+  const center = marks.find((mark) => mark.deg === 90);
+  assert.equal(center.offsetRatio, 0);
+  assert.equal(center.label, 'E');
+  assert.equal(marks.at(0).offsetRatio, -1);
+  assert.equal(marks.at(-1).offsetRatio, 1);
+});
+
+test('compass tape marks stay ordered across the 360/0 seam', () => {
+  const marks = compassTapeMarks(0, { halfSpanDeg: 60, stepDeg: 15 });
+  assert.deepEqual(marks.map((mark) => mark.deg), [300, 315, 330, 345, 0, 15, 30, 45, 60]);
+  const offsets = marks.map((mark) => mark.offsetRatio);
+  assert.deepEqual(offsets, [...offsets].sort((a, b) => a - b));
+  assert.equal(marks.find((mark) => mark.deg === 315).label, 'NW');
+});
+
+test('compass tape labels only the eight cardinal and intercardinal marks', () => {
+  const labelled = compassTapeMarks(180, { halfSpanDeg: 180, stepDeg: 15 })
+    .filter((mark) => mark.cardinal)
+    .map((mark) => mark.label);
+  assert.deepEqual(new Set(labelled), new Set(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']));
+  assert.ok(compassTapeMarks(180).filter((mark) => !mark.cardinal).every((mark) => mark.label === ''));
+});
+
+test('compass tape slides smoothly between marks rather than snapping', () => {
+  const marks = compassTapeMarks(7, { halfSpanDeg: 60, stepDeg: 15 });
+  const north = marks.find((mark) => mark.deg === 0);
+  assert.ok(Math.abs(north.offsetRatio - (-7 / 60)) < 1e-9);
+});
+
+test('compass tape returns nothing for an unavailable heading', () => {
+  assert.deepEqual(compassTapeMarks(Number.NaN), []);
+  assert.deepEqual(compassTapeMarks(null), []);
 });

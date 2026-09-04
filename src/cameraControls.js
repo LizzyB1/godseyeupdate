@@ -1,6 +1,11 @@
 import * as Cesium from 'cesium';
 import { buildMiniBox } from './miniBox.js';
-import { computeHorizontalForward, signedRollFromLevel } from './cameraMath.js';
+import { compassTapeMarks, computeHorizontalForward, signedRollFromLevel } from './cameraMath.js';
+import {
+  declinationDegrees,
+  formatVariation,
+  magneticHeadingDegrees,
+} from './magneticVariation.js';
 
 /**
  * Keyboard + mouse + on-screen camera controls, housed in one movable,
@@ -60,13 +65,20 @@ import { computeHorizontalForward, signedRollFromLevel } from './cameraMath.js';
  * "always horizontal" guarantee: the horizon can never end up tilted, no
  * matter what moved the camera.
  *
- * A live orientation readout lives at the top of the control box: a compass
- * needle that swings to the camera's current heading, with a small
- * camera-lens glyph at its tip, plus a text readout of heading/pitch/roll
- * in degrees (roll always reads ~0° now that it's locked level). It updates
- * on every rendered frame via Cesium's `scene.postRender`, so it stays
- * accurate no matter what moved the camera — keys, the on-screen pad,
- * mouse-drag, or Cesium's own native orbit/pan.
+ * A live orientation readout lives at the top of the control box: a flat
+ * horizontal compass tape that slides its cardinal marks under a fixed
+ * center index as the camera turns, with the heading underneath it. The
+ * heading is MAGNETIC — what a compass on the ground under the camera would
+ * read — derived from Cesium's true-north heading and the local magnetic
+ * variation (`magneticVariation.js`), with the variation itself and the
+ * pitch on one dim line below. Roll is not shown: it is locked level (see
+ * below), so it never carried information. Where variation is unavailable
+ * (outside the magnetic model's validity window) the readout falls back to
+ * true heading and says so with a `T` suffix instead of `M`.
+ *
+ * The readout updates on every rendered frame via Cesium's
+ * `scene.postRender`, so it stays accurate no matter what moved the camera —
+ * keys, the on-screen pad, mouse-drag, or Cesium's own native orbit/pan.
  *
  * Mouse: holding the right button and dragging vertically pitches (same
  * axis as T/G); dragging horizontally yaws the view left/right in place —
@@ -201,6 +213,11 @@ function isEditableTarget(el) {
  */
 const LEGACY_SHORTCUT_CODES = new Set(['KeyF', 'KeyD', 'Digit1', 'Digit3']);
 
+/** Degrees of compass tape visible either side of the center index. */
+const TAPE_HALF_SPAN_DEG = 60;
+/** Spacing between compass tape marks, in degrees. */
+const TAPE_STEP_DEG = 15;
+
 /** Radians → unsigned compass degrees in [0, 360). */
 function toCompassDeg(rad) {
   let deg = Cesium.Math.toDegrees(rad) % 360;
@@ -214,6 +231,11 @@ function toSignedDeg(rad) {
   if (deg > 180) deg -= 360;
   if (deg < -180) deg += 360;
   return deg;
+}
+
+/** Compass degrees → a zero-padded three-digit label, `360` folded to `000`. */
+function fmtCompassDeg(deg) {
+  return (Math.round(deg) % 360).toString().padStart(3, '0');
 }
 
 function fmtSignedDeg(deg) {
@@ -241,112 +263,64 @@ function buildControlBox({ onPress, onRelease }) {
     minHeight: MIN_HEIGHT,
     maxHeight: MAX_HEIGHT,
     anchor: { left: '24px', bottom: 'calc(2vh + 4.5rem)' },
-    // No custom header content any more — the heading chip used to live
-    // here, but the header already carries the grip/title/hide/collapse
-    // controls, and a 5th item crammed in with them read as cluttered.
-    // It's its own standalone viewpoint indicator in the body instead —
-    // see the orient block below.
+    // No custom header content — the header already carries the
+    // grip/title/hide/collapse controls, and a 5th item crammed in with
+    // them read as cluttered. The heading lives in the body under the
+    // compass tape instead — see the orient block below.
   });
   const body = miniBox.body;
 
-  // Orientation: compass ring (static, N/E/S/W always level — the ring
-  // itself never rotates, only the needle inside it does) + rotating
-  // needle tipped with a camera-lens glyph, a standalone heading chip
-  // (the "viewpoint indicator" — separated out of the header, see above),
-  // and a text readout. Roll always reads ~0° now that the horizon is
-  // locked level (see module doc comment).
+  // Orientation: a flat compass tape whose cardinal marks slide under a
+  // fixed center index as the camera turns, with the magnetic heading and
+  // one dim variation/pitch line underneath it. Everything reads straight
+  // over the map — no filled chips — so the block adds no opaque surface of
+  // its own.
   const orient = document.createElement('div');
   orient.className = 'camctl-orient';
   orient.setAttribute('aria-hidden', 'true');
 
-  const compass = document.createElement('div');
-  compass.className = 'camctl-orient-compass';
+  const tape = document.createElement('div');
+  tape.className = 'camctl-tape';
+  tape.title = 'Magnetic compass tape — cardinal marks slide under the center index as the camera turns';
 
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 40 40');
-  svg.setAttribute('class', 'camctl-orient-svg');
-  svg.setAttribute('focusable', 'false');
-
-  const ring = document.createElementNS(svg.namespaceURI, 'circle');
-  ring.setAttribute('class', 'camctl-orient-ring');
-  ring.setAttribute('cx', '20');
-  ring.setAttribute('cy', '20');
-  ring.setAttribute('r', '17.5');
-  svg.appendChild(ring);
-
-  // Full compass rose — N emphasized (primary), E/S/W as lighter secondary
-  // ticks — all fixed in place around the ring; only the needle rotates.
-  const CARDINAL_TICKS = [
-    { label: 'N', x: 20, y: 7, primary: true },
-    { label: 'E', x: 33, y: 20, primary: false },
-    { label: 'S', x: 20, y: 33, primary: false },
-    { label: 'W', x: 7, y: 20, primary: false },
-  ];
-  for (const { label, x, y, primary } of CARDINAL_TICKS) {
-    const tick = document.createElementNS(svg.namespaceURI, 'text');
-    tick.setAttribute('class', primary ? 'camctl-orient-n' : 'camctl-orient-ew');
-    tick.setAttribute('x', String(x));
-    tick.setAttribute('y', String(y));
-    tick.setAttribute('text-anchor', 'middle');
-    if (!primary) tick.setAttribute('dominant-baseline', 'central');
-    tick.textContent = label;
-    svg.appendChild(tick);
+  // One pooled element per mark slot. The tape spans a fixed number of
+  // degrees at a fixed interval, so the slot count never changes and each
+  // frame only rewrites transforms and labels.
+  const tapeMarks = [];
+  const markCount = Math.ceil((2 * TAPE_HALF_SPAN_DEG) / TAPE_STEP_DEG) + 1;
+  for (let i = 0; i < markCount; i += 1) {
+    const mark = document.createElement('span');
+    mark.className = 'camctl-tape-mark';
+    const tick = document.createElement('i');
+    const label = document.createElement('b');
+    mark.append(tick, label);
+    tape.appendChild(mark);
+    tapeMarks.push({ el: mark, labelEl: label });
   }
 
-  const needle = document.createElementNS(svg.namespaceURI, 'g');
-  needle.setAttribute('class', 'camctl-orient-needle');
+  const tapeIndex = document.createElement('span');
+  tapeIndex.className = 'camctl-tape-index';
+  tape.appendChild(tapeIndex);
+  orient.appendChild(tape);
 
-  const cone = document.createElementNS(svg.namespaceURI, 'path');
-  cone.setAttribute('class', 'camctl-orient-cone');
-  cone.setAttribute('d', 'M20 20 L16.2 10.5 L20 6.5 L23.8 10.5 Z');
-  needle.appendChild(cone);
+  const heading = document.createElement('div');
+  heading.className = 'camctl-heading';
+  const headingValue = document.createElement('b');
+  headingValue.textContent = '000';
+  const headingRef = document.createElement('small');
+  headingRef.textContent = '°M';
+  heading.append(headingValue, headingRef);
+  orient.appendChild(heading);
 
-  const camGroup = document.createElementNS(svg.namespaceURI, 'g');
-  camGroup.setAttribute('class', 'camctl-orient-cam');
-
-  const lensBody = document.createElementNS(svg.namespaceURI, 'circle');
-  lensBody.setAttribute('class', 'camctl-orient-lens-body');
-  lensBody.setAttribute('cx', '20');
-  lensBody.setAttribute('cy', '9');
-  lensBody.setAttribute('r', '4.1');
-  camGroup.appendChild(lensBody);
-
-  const lens = document.createElementNS(svg.namespaceURI, 'circle');
-  lens.setAttribute('class', 'camctl-orient-lens');
-  lens.setAttribute('cx', '20');
-  lens.setAttribute('cy', '9');
-  lens.setAttribute('r', '1.7');
-  camGroup.appendChild(lens);
-
-  needle.appendChild(camGroup);
-  svg.appendChild(needle);
-
-  const hub = document.createElementNS(svg.namespaceURI, 'circle');
-  hub.setAttribute('class', 'camctl-orient-hub');
-  hub.setAttribute('cx', '20');
-  hub.setAttribute('cy', '20');
-  hub.setAttribute('r', '2');
-  svg.appendChild(hub);
-
-  compass.appendChild(svg);
-  orient.appendChild(compass);
-
-  // The standalone "viewpoint indicator" — a quick big-number readout of
-  // heading, separated from the header (see above) and paired visually
-  // with the compass it belongs to, above the finer-grained HDG/PIT/ROL
-  // readout row.
-  const headingChip = document.createElement('div');
-  headingChip.className = 'camctl-heading-chip';
-  headingChip.title = 'Camera heading — where the viewpoint is currently looking';
-  headingChip.textContent = '000°';
-  orient.appendChild(headingChip);
-
+  // One dim line: local magnetic variation (east positive) and pitch. Roll
+  // is omitted — the horizon is locked level, so it only ever read ±0°.
   const readout = document.createElement('div');
   readout.className = 'camctl-orient-readout';
-  readout.innerHTML =
-    '<span class="camctl-orient-field"><b>HDG</b><i data-f="hdg">000°</i></span>' +
-    '<span class="camctl-orient-field"><b>PIT</b><i data-f="pit">+0°</i></span>' +
-    '<span class="camctl-orient-field"><b>ROL</b><i data-f="rol">+0°</i></span>';
+  const variationField = document.createElement('span');
+  variationField.textContent = 'VAR ---';
+  const pitchField = document.createElement('span');
+  pitchField.textContent = 'PIT ±0°';
+  readout.append(variationField, pitchField);
   orient.appendChild(readout);
 
   body.appendChild(orient);
@@ -446,14 +420,12 @@ function buildControlBox({ onPress, onRelease }) {
   body.appendChild(legend);
 
   return {
-    headingChip,
-    orientFields: {
-      hdg: readout.querySelector('[data-f="hdg"]'),
-      pit: readout.querySelector('[data-f="pit"]'),
-      rol: readout.querySelector('[data-f="rol"]'),
-    },
-    needleEl: needle,
-    camGroupEl: camGroup,
+    headingValue,
+    headingRef,
+    variationField,
+    pitchField,
+    headingEl: heading,
+    tapeMarks,
     destroy() {
       miniBox.destroy();
     },
@@ -769,10 +741,10 @@ export class CameraControls {
   }
 
   /**
-   * Reads the camera's current heading/pitch/roll and updates the
-   * orientation compass + text readout. Cheap DOM/CSS-transform writes
-   * only — safe to run on every `postRender`. Also drives the mouse-look
-   * smoothing above, on the same every-frame cadence.
+   * Reads the camera's current heading/pitch and updates the compass tape +
+   * heading readout. Cheap DOM/CSS-transform writes only — safe to run on
+   * every `postRender`. Also drives the mouse-look smoothing above, on the
+   * same every-frame cadence.
    */
   _updateOrientation() {
     const camera = this.viewer.camera;
@@ -783,26 +755,62 @@ export class CameraControls {
     const box = this._box;
     if (!box) return;
 
-    const headingDeg = toCompassDeg(camera.heading);
+    const trueHeadingDeg = toCompassDeg(camera.heading);
     const pitchDeg = toSignedDeg(camera.pitch);
-    const rollDeg = toSignedDeg(camera.roll);
 
-    // Needle points where the camera is looking (0 = N/up, clockwise),
-    // matching Cesium's own heading convention 1:1. Uses SVG's native
-    // `transform` attribute (rotate around an explicit pivot point) rather
-    // than a CSS transform — CSS transform-origin on an SVG <g> resolves
-    // against its bounding box, which drifts as the needle's own content
-    // rotates; the attribute form pivots exactly around (20,20) every time.
-    box.needleEl.setAttribute('transform', `rotate(${headingDeg} 20 20)`);
-    // The lens glyph at the needle's tip banks independently with roll,
-    // pivoting around its own center (20,9).
-    box.camGroupEl.setAttribute('transform', `rotate(${rollDeg} 20 9)`);
+    // Where a ground compass under the camera would point: Cesium reports
+    // heading against true north, so the local variation has to come off it
+    // before the number means anything to a compass in hand.
+    const carto = camera.positionCartographic;
+    const variationDeg = carto
+      ? declinationDegrees(
+        Cesium.Math.toDegrees(carto.latitude),
+        Cesium.Math.toDegrees(carto.longitude),
+        carto.height,
+      )
+      : null;
+    const magneticDeg = magneticHeadingDegrees(trueHeadingDeg, variationDeg);
+    const displayHeadingDeg = magneticDeg ?? trueHeadingDeg;
 
-    const hdgText = `${Math.round(headingDeg).toString().padStart(3, '0')}°`;
-    box.headingChip.textContent = hdgText;
-    box.orientFields.hdg.textContent = hdgText;
-    box.orientFields.pit.textContent = fmtSignedDeg(pitchDeg);
-    box.orientFields.rol.textContent = fmtSignedDeg(rollDeg);
+    const marks = compassTapeMarks(displayHeadingDeg, {
+      halfSpanDeg: TAPE_HALF_SPAN_DEG,
+      stepDeg: TAPE_STEP_DEG,
+    });
+    box.tapeMarks.forEach((slot, index) => {
+      const mark = marks[index];
+      if (!mark) {
+        slot.el.hidden = true;
+        return;
+      }
+      slot.el.hidden = false;
+      // The mark spans the tape's full width, so a percentage translate
+      // resolves against the tape rather than the mark's own text — the
+      // layout therefore needs no pixel measurement of the box, which the
+      // user is free to resize.
+      slot.el.style.transform = `translateX(${(mark.offsetRatio * 50).toFixed(3)}%)`;
+      // Fade toward the ends instead of clipping marks off mid-glyph.
+      slot.el.style.opacity = (1 - (Math.abs(mark.offsetRatio) ** 2) * 0.8).toFixed(3);
+      slot.el.classList.toggle('is-cardinal', mark.cardinal);
+      if (slot.labelEl.textContent !== mark.label) slot.labelEl.textContent = mark.label;
+    });
+
+    const headingText = fmtCompassDeg(displayHeadingDeg);
+    const refText = magneticDeg === null ? '°T' : '°M';
+    const variationText = `VAR ${formatVariation(variationDeg)}`;
+    const pitchText = `PIT ${fmtSignedDeg(pitchDeg)}`;
+    if (box.headingValue.textContent !== headingText) {
+      box.headingValue.textContent = headingText;
+      // True heading is the tooltip rather than a fourth readout — the
+      // magnetic number is the one being asked for at a glance.
+      box.headingEl.title = magneticDeg === null
+        ? 'Heading relative to true north — local magnetic variation is unavailable here'
+        : `Magnetic heading — ${fmtCompassDeg(trueHeadingDeg)}° true, variation ${formatVariation(variationDeg)}`;
+    }
+    if (box.headingRef.textContent !== refText) box.headingRef.textContent = refText;
+    if (box.variationField.textContent !== variationText) {
+      box.variationField.textContent = variationText;
+    }
+    if (box.pitchField.textContent !== pitchText) box.pitchField.textContent = pitchText;
   }
 
   _tick(t) {

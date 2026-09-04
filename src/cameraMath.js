@@ -58,3 +58,40 @@ export function computeHorizontalForward(position, direction, ellipsoid = Cesium
 export function signedRollFromLevel(roll) {
   return Cesium.Math.negativePiToPi(roll);
 }
+
+/** Cardinal/intercardinal labels, keyed by their compass degree. */
+const CARDINAL_LABELS = new Map([
+  [0, 'N'], [45, 'NE'], [90, 'E'], [135, 'SE'],
+  [180, 'S'], [225, 'SW'], [270, 'W'], [315, 'NW'],
+]);
+
+/**
+ * Marks for a horizontal compass tape centered on `headingDeg`: one entry per
+ * `stepDeg` within `halfSpanDeg` either side of the center, positioned by a
+ * `-1..1` ratio across the tape so the caller can lay them out without
+ * knowing the tape's pixel width. Only the eight cardinal/intercardinal marks
+ * carry a label; the rest are bare ticks.
+ * @param {number} headingDeg - compass degrees under the center index.
+ * @param {{halfSpanDeg?: number, stepDeg?: number}} [options]
+ * @returns {Array<{deg: number, offsetRatio: number, label: string, cardinal: boolean}>}
+ */
+export function compassTapeMarks(headingDeg, { halfSpanDeg = 60, stepDeg = 15 } = {}) {
+  if (!Number.isFinite(headingDeg)) return [];
+  const span = Math.max(1, halfSpanDeg);
+  const step = Math.max(1, stepDeg);
+  const marks = [];
+  // Walk absolute degrees around the (unwrapped) center so the offsets stay
+  // monotonic across the 360/0 seam, then wrap only the label value.
+  const first = Math.ceil((headingDeg - span) / step) * step;
+  for (let deg = first; deg <= headingDeg + span + 1e-9; deg += step) {
+    const wrapped = ((deg % 360) + 360) % 360;
+    const label = CARDINAL_LABELS.get(wrapped) ?? '';
+    marks.push({
+      deg: wrapped,
+      offsetRatio: (deg - headingDeg) / span,
+      label,
+      cardinal: label !== '',
+    });
+  }
+  return marks;
+}
