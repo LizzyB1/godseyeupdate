@@ -801,6 +801,20 @@ export class MapOverlaysEngine {
     }
 
     this._setStatus('Sampling scene heights…', 'computing');
+    // Yield one frame here before the actual (synchronous, sometimes tens
+    // of ms) sampling/marching-squares/stitching work below runs. Without
+    // this, the 'computing' status set above and the 'done' status set at
+    // the end of this method landed in the same synchronous JS task, and
+    // the browser coalesces every DOM mutation within one task into a
+    // single paint of the FINAL state — so the traffic light's purple
+    // "Computing…" phase was applied in the DOM for a moment but never
+    // actually painted, on every recompute that didn't need the
+    // tile-loading retry loop below (which already yields via its own
+    // setTimeout). That made "Refresh contours" look unresponsive: the
+    // light would just sit on whatever it already was and jump straight
+    // to green, with nothing to show a click had done anything.
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    if (token !== this._computeToken) return; // camera/settings may have changed during the yield
     const heights = sampleSceneHeights(this.viewer.scene, lonLatPairs);
     if (token !== this._computeToken) return; // superseded by a newer request
 
