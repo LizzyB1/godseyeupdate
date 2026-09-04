@@ -7,6 +7,7 @@ import {
   lookupAirportIn,
   routeEndpointTag,
   routeEndpointText,
+  shortAirportName,
 } from './airportLookup.js';
 
 const directory = indexAirportDirectory(JSON.parse(
@@ -60,11 +61,28 @@ test('the flight route readout is wired to the directory end to end', () => {
   assert.match(ui, /routeToCountry.*textContent = routeCountry\(destination\)/s);
 });
 
+test('the basic airport name drops only the generic airport tail', () => {
+  assert.equal(shortAirportName('Austin Bergstrom International Airport'), 'Austin Bergstrom');
+  assert.equal(shortAirportName('London Heathrow Airport'), 'London Heathrow');
+  assert.equal(shortAirportName('Sitka Rocky Gutierrez Airport'), 'Sitka Rocky Gutierrez');
+  // A base is not "an airport with a name" — the suffix is part of the identity.
+  assert.equal(shortAirportName('Kadena Air Base'), 'Kadena Air Base');
+  // Nothing left to keep, so keep it all.
+  assert.equal(shortAirportName('Airport'), 'Airport');
+  assert.equal(shortAirportName(''), '');
+});
+
+test('every directory airport keeps a basic name', () => {
+  for (const record of directory.records) {
+    assert.ok(shortAirportName(record[0]).length > 0, `${record[0]} shortened to nothing`);
+  }
+});
+
 test('endpoint formatters degrade with whatever the route API gave us', () => {
   const resolved = {
     code: 'AUS', name: 'Austin-Bergstrom International Airport', countryCode: 'US', country: 'United States',
   };
-  assert.equal(routeEndpointTag(resolved), 'AUS (US)');
+  assert.equal(routeEndpointTag(resolved), 'AUS · Austin-Bergstrom (US)');
   assert.equal(routeEndpointText(resolved), 'AUS · Austin-Bergstrom International Airport, United States');
   // Directory still loading: the code alone, never a placeholder country.
   assert.equal(routeEndpointTag({ code: 'AUS' }), 'AUS');

@@ -9,6 +9,7 @@ import {
   aircraftTrackingTarget,
   enterCockpitWithTracking,
 } from './cockpitTracking.js';
+import { shortAirportName } from './data/airportLookup.js';
 import { IntelHUD } from './hud.js';
 import { initHudReadoutsBox } from './hudReadoutsBox.js';
 import { initSummaryBox } from './summaryBox.js';
@@ -1409,7 +1410,8 @@ class CockpitViewController {
     const origin = info?.route?.origin;
     const destination = info?.route?.destination;
     const validDestination = Number.isFinite(destination?.lat) && Number.isFinite(destination?.lon);
-    const routeLabel = (airport) => [airport?.code, airport?.name].filter(Boolean).join(' · ') || 'UNKNOWN';
+    const routeLabel = (airport) => [airport?.code, shortAirportName(airport?.name)]
+      .filter(Boolean).join(' · ') || 'UNKNOWN';
     // City and country come from the OurAirports directory, which resolves a
     // moment after the codes do — an empty line until then, never a placeholder.
     const routeCountry = (airport) => [airport?.city, airport?.country].filter(Boolean).join(', ');
