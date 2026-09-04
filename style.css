@@ -10251,7 +10251,12 @@ body.scene-playback-mode #first-run-launcher {
 }
 .gev-settings-status.visible { opacity: 1; }
 
-/* ── Map Overlays: shared mini-box chrome (src/miniBox.js) ──────────────── */
+/* ── Map overlay boxes: shared mini-box chrome (src/miniBox.js) ─────────────
+   Worn by all three overlay boxes — Contours, Grid Lines and Terrain — which
+   pass `stylePrefix: 'mapovl'` to buildMiniBox so one set of rules dresses the
+   panel each of them split off from. Their root ids stay distinct
+   (contourbox-pad / gridbox-pad / terrainbox-pad) for hide state and
+   geometry. */
 .mapovl-pad {
   position: fixed;
   z-index: 146;

@@ -29,6 +29,7 @@ const TOGGLE_PANEL_COST_ORDER = Object.freeze([
   'traffic',                // dense road geometry, continuous repaint
   'ais-live-vessels',       // large live entity set over a websocket
   'flights',                // large live entity set, interpolated between polls
+  'contours',               // terrain sampling + marching squares over the view
   'military',
   'military-awareness',
   'radio',
@@ -39,6 +40,7 @@ const TOGGLE_PANEL_COST_ORDER = Object.freeze([
   'local-dams',
   'earthquakes',
   'rocket-launches',
+  'grid-lines',             // a few dozen polylines, recomputed only on move
 ]);
 
 const SUPERSEDED_VISIBILITY_INTENT = Symbol('superseded-visibility-intent');

@@ -25,7 +25,7 @@ function el(tag, className, html) {
 
 /**
  * A small min/interim/max scale rendered under a `type="range"` slider —
- * see `mapOverlayControls.js`'s identical helper for why plain evenly-
+ * see `overlayControlsKit.js`'s identical helper for why plain evenly-
  * spaced labels (no JS pixel-sync to the thumb) are enough here.
  * @param {string[]} labels - Evenly-spaced values from min to max, as display text.
  */

@@ -4,9 +4,9 @@ import { buildMiniBox } from './miniBox.js';
  * @file Standalone "Coordinates" mini control box: the cursor/pin tool for
  * reading out a location's lat/long, height, address, and Google Maps link,
  * plus a copy-to-clipboard button — driven by `src/data/mapOverlays.js`'s
- * `MapOverlaysEngine`, same as `mapOverlayControls.js`.
+ * `MapOverlaysEngine`, same as `contoursBox.js`/`gridBox.js`.
  *
- * Split out of `mapOverlayControls.js` so it can be moved, resized,
+ * Split out of the old "MAP OVERLAYS" box so it can be moved, resized,
  * collapsed, and reset independently of the rest of Map Overlays (contours /
  * exaggeration / grid) — both boxes share one engine instance.
  *
@@ -19,7 +19,7 @@ import { buildMiniBox } from './miniBox.js';
  * text than elsewhere in the app since five buttons share the space.
  *
  * Same movable/resizable/persisted-position/collapsible box mechanics as
- * `cameraControls.js` and `mapOverlayControls.js`, all built on the shared
+ * `cameraControls.js` and `contoursBox.js`, all built on the shared
  * `miniBox.js` helper.
  *
  * @module coordinatesBox

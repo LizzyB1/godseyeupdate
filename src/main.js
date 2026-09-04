@@ -35,7 +35,10 @@ import { initGpsTrackOverlay } from './data/gpsTracks.js';
 import { initGpsTrackPanel } from './gpsTrackPanel.js';
 import { initPanelDragging } from './panelDrag.js';
 import { initMapOverlays } from './data/mapOverlays.js';
-import { initMapOverlayControls } from './mapOverlayControls.js';
+import { initContoursBox } from './contoursBox.js';
+import { initGridBox } from './gridBox.js';
+import { initTerrainBox } from './terrainBox.js';
+import { createOverlayLayers } from './data/overlayLayers.js';
 import { initCoordinatesBox } from './coordinatesBox.js';
 import { initPanelRestoreTray } from './panelRestoreTray.js';
 import { initAboutBox } from './aboutBox.js';
@@ -284,6 +287,13 @@ async function init() {
       flyToPalma(viewer);
     }
 
+    // Map overlays engine (src/data/mapOverlays.js): elevation contours,
+    // vertical exaggeration, lat/long grid, chart datum and the screenshot
+    // tool. Built before the layer registry because contours and the grid
+    // are registered layers of its own (src/data/overlayLayers.js), toggled
+    // from the layer list like any feed; its control boxes come later.
+    const mapOverlays = initMapOverlays(viewer);
+
     // Initialize data layer manager
     const dataManager = new DataLayerManager(viewer, {
       allowQaRegistration: import.meta.env.DEV,
@@ -303,6 +313,9 @@ async function init() {
     dataManager.register(militaryAwarenessLayer);
     militaryAwarenessLayer.attachDataManager(dataManager);
     for (const layer of localDataLayers) {
+      dataManager.register(layer);
+    }
+    for (const layer of createOverlayLayers(mapOverlays)) {
       dataManager.register(layer);
     }
     // Restoration starts only after the complete production registry is sealed.
@@ -363,19 +376,31 @@ async function init() {
     const gpsTrackOverlay = initGpsTrackOverlay(viewer);
     const gpsTrackPanel = initGpsTrackPanel(gpsTrackOverlay);
 
-    // Map overlays: elevation contours, vertical exaggeration, lat/long
-    // grid, and the screenshot tool — see src/data/mapOverlays.js (engine)
-    // and src/mapOverlayControls.js (box). The coordinate cursor/pin tool
-    // is its own separately movable/resizable/hidable box on the same
-    // engine — see src/coordinatesBox.js.
-    const mapOverlays = initMapOverlays(viewer);
-    const mapOverlayControls = initMapOverlayControls(mapOverlays);
+    // One box per overlay feature, each separately movable/resizable/
+    // hidable, replacing the single oversized "MAP OVERLAYS" panel:
+    // contours (src/contoursBox.js), grid (src/gridBox.js), terrain
+    // (src/terrainBox.js) and the coordinate cursor/pin tool
+    // (src/coordinatesBox.js). None of them carries an on/off for its
+    // feature — that is the layer row.
+    const contoursBox = initContoursBox(mapOverlays);
+    const gridBox = initGridBox(mapOverlays);
+    const terrainBox = initTerrainBox(mapOverlays, {
+      onReset: () => {
+        contoursBox.sync();
+        gridBox.sync();
+        // The engine's reset clears both feature flags, so the layer rows
+        // that own them have to come off with it.
+        for (const id of ['contours', 'grid-lines']) {
+          if (dataManager.isEnabled(id)) dataManager.toggle(id);
+        }
+      },
+    });
     const coordinatesBox = initCoordinatesBox(mapOverlays);
 
     // Bathymetry: undersea depth contours (self-computed via marching
     // squares) and depth markers, both sampled from the GEBCO grid via
     // opentopodata.org — free, no API key. Self-contained, its own
-    // engine/box pair mirroring mapOverlays/mapOverlayControls above — see
+    // engine/box pair mirroring mapOverlays/contoursBox above — see
     // src/data/bathymetry.js and src/bathymetryBox.js.
     const bathymetry = initBathymetry(viewer);
     const bathymetryBox = initBathymetryBox(bathymetry);
@@ -506,7 +531,9 @@ async function init() {
       gpsTrackOverlay,
       gpsTrackPanel,
       mapOverlays,
-      mapOverlayControls,
+      contoursBox,
+      gridBox,
+      terrainBox,
       coordinatesBox,
       bathymetry,
       bathymetryBox,
