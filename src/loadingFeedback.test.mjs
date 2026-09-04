@@ -181,6 +181,23 @@ test('normalizes lifecycle and refresh loading without owning manager state', ()
   );
 });
 
+test('a disabled layer is never loading, however stale its own stats are', () => {
+  const stuck = {
+    id: 'traffic',
+    name: 'Street Traffic',
+    enabled: false,
+    lifecycleState: 'disabled',
+    stats: { loading: true, count: 0 },
+  };
+  assert.equal(normalizeLayerLoading(stuck).loading, false);
+  assert.deepEqual(aggregateLayerLoading([stuck]).activeIds, []);
+  // Turning off is still work in progress, and still announced.
+  assert.equal(
+    normalizeLayerLoading({ ...stuck, lifecycleState: 'disabling' }).loading,
+    true,
+  );
+});
+
 test('delays initial loading so instant operations never flash', () => {
   const summary = aggregateLayerLoading([{ id: 'a', name: 'A', lifecycleState: 'enabling' }]);
   const pending = reduceLoadingFeedback(createLoadingFeedbackState(), summary, 100);

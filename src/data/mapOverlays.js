@@ -690,6 +690,29 @@ export class MapOverlaysEngine {
   }
 
   /**
+   * Raw contour-engine counters for the Telemetry box: the same phase the
+   * status light shows, the span that gates a recompute, and the settings
+   * a recompute would use — read-only, no computation triggered.
+   * @returns {{phase: string, status: string, stale: boolean,
+   *   contoursEnabled: boolean, viewSpanDeg: number|null,
+   *   maxViewSpanDeg: number, majorSpacingM: number, minorEnabled: boolean,
+   *   minorSpacingM: number}}
+   */
+  getTelemetry() {
+    return {
+      phase: this._contourPhase,
+      status: this._contourStatus,
+      stale: this._contoursStale,
+      contoursEnabled: this.state.contoursEnabled,
+      viewSpanDeg: this._lastViewSpanDeg,
+      maxViewSpanDeg: this.state.contourMaxViewSpanDeg,
+      majorSpacingM: this.state.contourMajorSpacing,
+      minorEnabled: this.state.contourMinorEnabled,
+      minorSpacingM: this.state.contourMinorSpacing,
+    };
+  }
+
+  /**
    * True if at least one of `positions` projects anywhere near the actual
    * visible canvas — see `CONTOUR_SCREEN_MARGIN_PX`'s comment for why this
    * exists on top of the view-rectangle sampling bounds. A projection

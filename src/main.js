@@ -39,7 +39,7 @@ import { initMapOverlayControls } from './mapOverlayControls.js';
 import { initCoordinatesBox } from './coordinatesBox.js';
 import { initPanelRestoreTray } from './panelRestoreTray.js';
 import { initAboutBox } from './aboutBox.js';
-import { initStatusBox } from './statusBox.js';
+import { initTelemetryBox } from './telemetryBox.js';
 import { initCacheControllerBox } from './cacheControllerBox.js';
 import { initCompassBox } from './compassBox.js';
 import { initBathymetry } from './data/bathymetry.js';
@@ -389,11 +389,11 @@ async function init() {
     // formats, etc. — see src/aboutBox.js.
     const aboutBox = initAboutBox();
 
-    // Verbose "what's loading/fetching right now" box — reuses
+    // Raw render/feed/compute counters, one internal panel each — reuses
     // DataLayerManager's existing per-layer stats/lifecycle plus the
     // bathymetry/contour engines' existing status callbacks, so it needs
-    // to be built after all three exist. See src/statusBox.js.
-    const statusBox = initStatusBox({ dataManager, bathymetry, mapOverlays });
+    // to be built after all three exist. See src/telemetryBox.js.
+    const telemetryBox = initTelemetryBox({ viewer, dataManager, bathymetry, mapOverlays });
 
     // Admin view onto the durable cross-session cache (reverse-geocoded
     // addresses, bathymetry depth samples) — total usage, a per-type
@@ -512,7 +512,7 @@ async function init() {
       bathymetryBox,
       panelRestoreTray,
       aboutBox,
-      statusBox,
+      telemetryBox,
       cacheControllerBox,
       compassBox,
       panelDrag,

@@ -4371,7 +4371,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   border-radius: 999px;
 }
 
-/* One line per layer, laid out like a .statusbox-row: the name IS the
+/* One line per layer, laid out like a telemetry/status row: the name IS the
    toggle, the state sits at the end of the same line, and the source/age
    line only appears when it has something to say (manager.js `_syncMeta`).
    Padding is down to what keeps the rows from touching. */
@@ -9636,14 +9636,13 @@ body.scene-playback-mode #first-run-launcher {
 }
 .about-pad.is-collapsed .about-body { display: none; }
 
-/* ── Status: standalone mini-box chrome (src/statusBox.js) ──────────────
-   Verbose "what's loading/fetching right now" box. Chrome is the same
-   copy-pasted pattern as About/GPS Tracks/Bathymetry above; section
-   headers inside reuse `.mapovl-section`/`-section-title` verbatim, same
-   reasoning as those boxes. Only `.statusbox-row`/`-list`/`-empty`/
-   `-engine-row` below are new — nothing existing has this label+state-
-   badge+detail, color-coded-by-feed-state row shape. */
-.statusbox-pad {
+/* ── Telemetry: standalone mini-box chrome (src/telemetryBox.js) ────────
+   Raw render/feed/compute counters — the box that replaced STATUS. Chrome
+   is the same copy-pasted pattern as About/GPS Tracks/Bathymetry above;
+   the `.telemetry-area`/`-list`/`-row` content below is its own, since
+   nothing existing has this internal-panel-per-area, label + raw-value
+   shape. */
+.telemetry-pad {
   position: fixed;
   z-index: 146;
   display: flex;
@@ -9655,7 +9654,7 @@ body.scene-playback-mode #first-run-launcher {
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
   overflow: hidden;
 }
-.statusbox-header {
+.telemetry-header {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -9668,14 +9667,14 @@ body.scene-playback-mode #first-run-launcher {
   -webkit-user-select: none;
   touch-action: none;
 }
-.statusbox-header.is-dragging { cursor: grabbing; }
-.statusbox-grip {
+.telemetry-header.is-dragging { cursor: grabbing; }
+.telemetry-grip {
   flex: 0 0 auto;
   font: 700 11px/1 var(--font-mono);
   letter-spacing: 0.1em;
   color: var(--text-dim);
 }
-.statusbox-title {
+.telemetry-title {
   flex: 1 1 auto;
   font: 700 10px/1 var(--font-mono);
   letter-spacing: 0.08em;
@@ -9683,17 +9682,17 @@ body.scene-playback-mode #first-run-launcher {
 }
 /* Close/collapse chip styling: covered by the generic
    `[class$="-close-btn"]`/`[class$="-collapse-btn"]` rules above. */
-.statusbox-body {
+.telemetry-body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 5px;
+  gap: 4px;
+  padding: 4px;
   overflow-y: auto;
   overflow-x: hidden;
 }
-.statusbox-resize-handle {
+.telemetry-resize-handle {
   position: absolute;
   right: 0;
   bottom: 0;
@@ -9703,7 +9702,7 @@ body.scene-playback-mode #first-run-launcher {
   z-index: 3;
   touch-action: none;
 }
-.statusbox-resize-handle::after {
+.telemetry-resize-handle::after {
   content: '';
   position: absolute;
   right: 3px;
@@ -9716,110 +9715,68 @@ body.scene-playback-mode #first-run-launcher {
     transparent 1.4px, transparent 4px
   );
 }
-.statusbox-resize-handle:hover::after, .statusbox-resize-handle.is-active::after {
+.telemetry-resize-handle:hover::after, .telemetry-resize-handle.is-active::after {
   background-image: repeating-linear-gradient(
     135deg,
     var(--accent) 0, var(--accent) 1.4px,
     transparent 1.4px, transparent 4px
   );
 }
-.statusbox-pad.is-collapsed .statusbox-body { display: none; }
+.telemetry-pad.is-collapsed .telemetry-body { display: none; }
 
-/* ── Status: content (row list, color-coded by feed state) ────────────
-   Two-per-line grid, not a single stacked column — with 16 registered
-   layers in "ALL LAYERS" alone, one-per-line ran the box far taller than
-   any other mini-box. A lone item (an empty-state message, or an odd
-   count) just occupies the first cell; `.statusbox-empty` spans both so
-   it isn't stranded half-width. */
-.statusbox-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px 4px;
-}
-.statusbox-empty {
-  grid-column: 1 / -1;
-  font: 500 10px/1.25 var(--font-mono);
-  color: var(--text-primary);
-  padding: 3px 5px;
-  border-radius: 5px;
-  background: rgba(0, 0, 0, 0.6);
-}
-.statusbox-row {
+/* ── Telemetry: content (one internal panel per area of concern) ────────
+   Each area is its own framed box inside the panel; rows are a fixed
+   label gutter plus a monospace value that wraps, so a long raw dump
+   (`mode=live coverage=42 tiles=18 …`) stays readable without pushing the
+   labels around. */
+.telemetry-area {
   display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px;
+  border: 1px solid var(--glass-border);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.45);
+}
+.telemetry-area-title {
+  font: 700 9px/1.2 var(--font-mono);
+  letter-spacing: 0.09em;
+  color: var(--text-secondary);
+  padding-bottom: 2px;
+}
+.telemetry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.telemetry-row {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 4px;
   align-items: baseline;
-  flex-wrap: wrap;
-  gap: 3px;
-  min-width: 0;
   font: 500 10px/1.25 var(--font-mono);
   color: var(--text-primary);
-  padding: 2px 4px;
-  border-radius: 5px;
-  background: rgba(0, 0, 0, 0.6);
-  border-left: 2px solid var(--glass-border);
 }
-.statusbox-row-dot {
-  flex: 0 0 auto;
-  align-self: center;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--text-dim);
-}
-.statusbox-row-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--text-primary);
-  word-break: break-word;
-}
-.statusbox-row-state {
-  flex: 0 0 auto;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  opacity: 0.85;
-}
-.statusbox-row-detail {
-  flex: 1 1 100%;
+.telemetry-row-label {
   color: var(--text-dim);
-  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-/* nominal: default dim dot/border — the base rule above already covers it */
-.statusbox-row--loading {
-  border-left-color: var(--accent);
-}
-.statusbox-row--loading .statusbox-row-dot {
-  background: var(--accent);
-  animation: statusbox-pulse 1s ease-in-out infinite;
-}
-.statusbox-row--loading .statusbox-row-state { color: var(--accent); }
-.statusbox-row--degraded, .statusbox-row--stale, .statusbox-row--fallback {
-  border-left-color: #ffffff;
-}
-.statusbox-row--degraded .statusbox-row-dot,
-.statusbox-row--stale .statusbox-row-dot,
-.statusbox-row--fallback .statusbox-row-dot {
-  background: #ffffff;
-}
-.statusbox-row--unavailable {
-  border-left-color: #ffffff;
-  opacity: 0.75;
-}
-.statusbox-row--unavailable .statusbox-row-dot { background: #ffffff; }
-.statusbox-row--off {
-  opacity: 0.5;
-}
-@keyframes statusbox-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-.statusbox-engine-row {
+.telemetry-row-value {
   min-width: 0;
-  font: 500 10px/1.3 var(--font-mono);
-  color: var(--text-primary);
-  padding: 3px 5px;
-  border-radius: 5px;
-  background: rgba(0, 0, 0, 0.6);
   word-break: break-word;
 }
+.telemetry-row--loading .telemetry-row-value,
+.telemetry-row--busy .telemetry-row-value { color: var(--accent); }
+.telemetry-row--degraded .telemetry-row-value,
+.telemetry-row--stale .telemetry-row-value,
+.telemetry-row--fallback .telemetry-row-value { color: #ffffff; }
+.telemetry-row--unavailable .telemetry-row-value {
+  color: #ffffff;
+  font-weight: 700;
+}
+.telemetry-row--off { opacity: 0.5; }
 
 /* ── GPS Tracks: content (drop zone / status / track rows) ──────────────── */
 .gps-track-panel__drop {
@@ -11008,7 +10965,7 @@ body.scene-playback-mode #first-run-launcher {
 .summarybox-pad.is-collapsed .summarybox-body { display: none; }
 
 /* ── Data Cache box (src/cacheControllerBox.js) ──────────────────────────
-   Same chrome pattern as .statusbox-pad (hideable: close-btn + collapse-
+   Same chrome pattern as .telemetry-pad (hideable: close-btn + collapse-
    btn both present). Content is new — a usage bar plus a per-type row
    list, each row ending in its own small "Flush" button. */
 .cachectl-pad {
@@ -11562,7 +11519,7 @@ body.scene-playback-mode #first-run-launcher {
 }
 
 @media (max-width: 720px), (max-height: 520px) {
-  .mapovl-pad, .coordbox-pad, .hudread-pad, .bathy-pad, .gpstrack-pad, .about-pad, .statusbox-pad, .summarybox-pad, .cachectl-pad, .compassbox-pad { display: none; }
+  .mapovl-pad, .coordbox-pad, .hudread-pad, .bathy-pad, .gpstrack-pad, .about-pad, .telemetry-pad, .summarybox-pad, .cachectl-pad, .compassbox-pad { display: none; }
   /* .restoretray-pad deliberately excluded — the Hidden Panels tray must
      stay reachable even on a small screen/viewport, or a fully-hidden
      panel would have no way back (see panelVisibility.js). */
