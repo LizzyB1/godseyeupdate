@@ -43,6 +43,13 @@ export const DATA_CREDITS = [
       '(ODbL 1.0)',
   },
   {
+    key: 'ourairports',
+    html:
+      'Flight route airports &amp; countries: ' +
+      '<a href="https://ourairports.com/data/" target="_blank" rel="noopener">OurAirports</a> ' +
+      '(public domain)',
+  },
+  {
     key: 'aisstream',
     html:
       'Live vessels (AIS): ' +

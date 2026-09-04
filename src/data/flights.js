@@ -60,6 +60,7 @@ import {
   COURSE_HOLD_SPEED_MPS,
 } from './motionModel.js';
 import { routePlausible } from './routePlausible.js';
+import { describeRoute, routeEndpointTag, routeEndpointText } from './airportLookup.js';
 import { isMilitaryIcao, isMilitaryLayerActive, refreshMilitaryRegistryIfStale, onMilitaryLayerActiveChange } from './militaryRegistry.js';
 import { formatFlightLevel } from './detectionDraw.js';
 import { createGroundSnap } from './groundSnap.js';
@@ -413,8 +414,9 @@ function _contextSubjectMetadata(icao24) {
   const described = _describeFlight(icao24);
   if (!described) return null;
   const altM = Math.round(described.altitudeM || 0);
-  const route = described.route && _routeIsPlausible(icao24, described.route)
-    ? `${described.route.origin.code} → ${described.route.destination.code}`
+  const routeOk = described.route && _routeIsPlausible(icao24, described.route);
+  const route = routeOk
+    ? `${routeEndpointTag(described.route.origin)} → ${routeEndpointTag(described.route.destination)}`
     : null;
   return {
     id: icao24,
@@ -438,6 +440,9 @@ function _contextSubjectMetadata(icao24) {
         : '',
       heading: Number.isFinite(described.track) ? `${Math.round(described.track)}°` : '',
       route: route || '',
+      // Spelled out for the voice payload, which reads flat text only.
+      routeFrom: routeOk ? routeEndpointText(described.route.origin) : '',
+      routeTo: routeOk ? routeEndpointText(described.route.destination) : '',
       icao24,
       // Honesty cue: the contact is coasting on dead reckoning, so the
       // narrated position/velocity are last-known rather than live.
@@ -847,7 +852,19 @@ function _requestRouteEnrichment(icao24) {
     const meta = _flightData.get(icao24);
     if (!meta) return;
     meta.airline = data.airline || meta.airline;
-    if (data.origin && data.destination) meta.route = { origin: data.origin, destination: data.destination };
+    if (data.origin && data.destination) {
+      const route = { origin: data.origin, destination: data.destination };
+      meta.route = route;
+      // The API gives a code and a municipality; the OurAirports directory adds
+      // the airport's own name and its country. Async because the directory is
+      // a lazy import — the route shows immediately and gains the names after.
+      describeRoute(route).then((described) => {
+        const live = _flightData.get(icao24);
+        if (!live || live.route !== route) return; // evicted, or a newer route won
+        live.route = described;
+        if (icao24 === _trackedIcao && _trackedEntity) _updateTrackedLabelModel(icao24);
+      });
+    }
     if (icao24 === _trackedIcao && _trackedEntity) _updateTrackedLabelModel(icao24);
   }, true); // route lookups only fire for the TRACKED plane — front of the queue
 }
@@ -3296,7 +3313,7 @@ function _trackedLabelText(icao24) {
     : [info.airline, info.typeName || info.typeCode].filter(Boolean).join(' · ');
   if (ident) lines.push(ident);
   if (info.route && _routeIsPlausible(icao24, info.route)) {
-    lines.push(`${info.route.origin.code} → ${info.route.destination.code}`);
+    lines.push(`${routeEndpointTag(info.route.origin)} → ${routeEndpointTag(info.route.destination)}`);
   }
   return lines.join('\n');
 }

@@ -67,6 +67,7 @@ Static datasets shipped in the repo for an out-of-the-box experience. **None are
 | **TeleGeography Submarine Cable Map** (712 cables + 1,917 landing points) | `telegeography_submarine_cables/` | **CC BY-NC-SA 3.0** | ❌ **NonCommercial — remove for commercial use** | "© TeleGeography — submarinecablemap.com" |
 | **Natural Earth physical regions** (1,046 land + 292 marine named polygons) | `natural_earth/` | **Public domain** | ✅ (no restrictions) | "Made with Natural Earth" (courtesy credit — not legally required) |
 | **DataSF Analysis Neighborhoods** (41 SF neighborhood polygons) | `neighborhoods/` | **PDDL 1.0** (public domain) | ✅ (no restrictions) | "City & County of San Francisco — DataSF" (courtesy — not legally required) |
+| **OurAirports** (9,258 routable airports, 18,474 codes, 249 countries) | `airports.json` | **Public domain** | ✅ (no restrictions) | "OurAirports — ourairports.com/data" (courtesy — not legally required) |
 
 ### ⚠️ TeleGeography is bundled but NonCommercial
 
@@ -96,6 +97,19 @@ Suomi-NPP) clamped to the trailing 24 h, cached 30 min to respect the shared MAP
 transaction quota. Requires a free `FIRMS_MAP_KEY`
 (https://firms.modaps.eosdis.nasa.gov/api/map_key/); the layer is empty without it.
 The former bundled 2026-05-25 snapshot was removed 2026-07-16.
+
+### OurAirports airport directory (`airports.json`)
+
+`airports.json` resolves the origin/destination codes the adsbdb route lookup returns
+into the airport's full name, its city, and the country it sits in — the FROM/TO plates
+in the cockpit flight plan and the tracked-contact label. Built by
+`scripts/build-airports.mjs` from OurAirports' `airports.csv` and `countries.csv`
+(https://ourairports.com/data/, public domain), filtered to airports with an IATA code
+or scheduled service (~9K of ~86K rows — the rest are heliports and private strips) and
+stored as positional records with a code index, which keeps it around 600 KB. The flights
+layer imports it dynamically, so it only downloads once a route needs resolving.
+Re-run the script to refresh it; OurAirports is community-maintained and its coverage of
+small fields varies.
 
 ### Natural Earth physical regions (`natural_earth/`)
 
